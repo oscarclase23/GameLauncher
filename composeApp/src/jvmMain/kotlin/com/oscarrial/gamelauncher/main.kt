@@ -7,6 +7,7 @@ import com.oscarrial.gamelauncher.ui.theme.GameLauncherTheme // Importa tu tema
 
 
 fun main() = application {
+    println("Sistema operativo detectado: ${IdentificarOS.getCurrentOS()}")
     Window(onCloseRequest = ::exitApplication, title = "Lanzador de Aplicaciones - Oscar Rial") {
         // 1. Aplica el tema de color
         GameLauncherTheme {
