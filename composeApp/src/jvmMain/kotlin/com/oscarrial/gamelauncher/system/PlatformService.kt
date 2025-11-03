@@ -11,33 +11,24 @@ enum class OperatingSystem {
 }
 
 /**
- * Clase de utilidad para identificar y proporcionar información
- * del sistema operativo actual.
+ * Clase de utilidad para identificar el SO y el prefijo de lanzamiento.
  */
 object PlatformService {
 
-    /**
-     * Detecta el sistema operativo actual basándose en la propiedad 'os.name'.
-     * @return El enum OperatingSystem correspondiente al SO.
-     */
     fun getCurrentOS(): OperatingSystem {
         val osName = System.getProperty("os.name", "generic").lowercase()
         return when {
-            // Detección de Windows
             osName.contains("win") -> OperatingSystem.Windows
-            // Detección de Linux (incluye Unix/Aix/Solaris)
             osName.contains("nix") || osName.contains("nux") || osName.contains("aix") -> OperatingSystem.Linux
-            // Detección de macOS
             osName.contains("mac") -> OperatingSystem.MacOS
-            // Otros sistemas
             else -> OperatingSystem.Other
         }
     }
 
     /**
-     * Devuelve el comando de shell adecuado para lanzar una aplicación.
-     * Esta es una simplificación inicial.
-     * @return El prefijo del comando (ej: "cmd.exe /c start " para Windows).
+     * Devuelve el prefijo base del comando de shell.
+     * Nota: Este prefijo ya no es necesario para ProcessBuilder en el ViewModel,
+     * pero se mantiene aquí para la detección del SO.
      */
     fun getLaunchPrefix(): String {
         return when (getCurrentOS()) {

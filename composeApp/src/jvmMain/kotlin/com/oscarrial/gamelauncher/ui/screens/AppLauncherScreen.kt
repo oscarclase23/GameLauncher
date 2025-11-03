@@ -31,7 +31,8 @@ fun AppLauncherScreen() {
     // 2. OBTENER ESTADOS Y LÓGICA DEL VIEWMODEL:
     val filteredApps = viewModel.filteredApps
     val searchQuery = viewModel.searchQuery
-    var showAddDialog by remember { mutableStateOf(false) } // Este estado sigue siendo de la UI (solo afecta al diálogo)
+    var showAddDialog by remember { mutableStateOf(false) }
+    val isLoading = viewModel.isLoading
 
     Box(
         modifier = Modifier
@@ -48,7 +49,7 @@ fun AppLauncherScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "🎮 Lanzador de Aplicaciones", // Título de la app
+                    "🎮 Lanzador de Aplicaciones",
                     style = MaterialTheme.typography.headlineSmall,
                     color = AppColors.OnBackground
                 )
@@ -68,20 +69,26 @@ fun AppLauncherScreen() {
                 onQueryChange = viewModel::updateSearchQuery
             )
 
-            Spacer(Modifier.height(24.dp)) // Aumentado el espacio para la rejilla
+            Spacer(Modifier.height(24.dp))
 
-            // --- 3. GRID DE APPS (Contenido principal) ---
-            if (filteredApps.isEmpty()) {
+            // --- 3. GRID DE APPS (Contenido principal con manejo de carga) ---
+
+            if (isLoading) {
+                LoadingView()
+            } else if (filteredApps.isEmpty()) {
                 EmptyView()
             } else {
                 LazyVerticalGrid(
-                    // Configuración de la rejilla responsiva (minimo 200dp por columna)
-                    columns = GridCells.Adaptive(minSize = 200.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    columns = GridCells.Adaptive(minSize = 280.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filteredApps, key = { it.name }) { app ->
+                    // 🔧 FIX: Usar path como key única en lugar de name
+                    items(
+                        items = filteredApps,
+                        key = { it.path } // ✅ Cada path es único
+                    ) { app ->
                         AppCard(
                             app = app,
                             onClick = { viewModel.launchApp(app) },
@@ -105,7 +112,7 @@ fun AppLauncherScreen() {
     }
 }
 
-// ----------- COMPONENTES (Para este commit, se mantienen aquí) -----------
+// ----------- COMPONENTES ADICIONALES -----------
 
 @Composable
 fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
@@ -118,7 +125,6 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icono de búsqueda
             Text("🔍", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.width(8.dp))
             BasicTextField(
@@ -129,7 +135,6 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                 singleLine = true,
                 cursorBrush = SolidColor(AppColors.Primary),
                 decorationBox = { inner ->
-                    // Placeholder
                     if (query.isEmpty()) Text(
                         "Buscar apps (ej: chrome, spotify, code)...",
                         color = AppColors.OnSurface.copy(alpha = 0.5f)
@@ -137,7 +142,6 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                     inner()
                 }
             )
-            // Botón para limpiar la búsqueda
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
                     Text("❌")
@@ -151,48 +155,56 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
 fun AppCard(app: AppInfo, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
-    // Animación de escala al pasar el ratón (efecto visual de desktop)
-    val scale by animateFloatAsState(if (hovered) 1.03f else 1f, spring(dampingRatio = 0.7f))
+    val scale by animateFloatAsState(if (hovered) 1.02f else 1f, spring(dampingRatio = 0.8f))
 
     Card(
         modifier = Modifier
+            .heightIn(min = 200.dp)
             .scale(scale)
-            // Hacemos que sea clickeable y detecte el hover
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-        // Elevación sutilmente mayor al hacer hover
         elevation = CardDefaults.cardElevation(defaultElevation = if (hovered) 8.dp else 4.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Icono (como emoji hardcodeado)
-            Text(app.icon, style = MaterialTheme.typography.displaySmall)
-            Spacer(Modifier.height(8.dp))
+            // Icono
+            Text(text = app.icon, style = MaterialTheme.typography.displayMedium)
+            Spacer(Modifier.height(12.dp))
 
-            // Nombre de la App
+            // Nombre de la app
             Text(
-                app.name,
+                text = app.name,
                 color = AppColors.OnSurface,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium
             )
-            Spacer(Modifier.height(4.dp))
 
-            // Descripción (simula la categoría o un subtítulo)
-            Text(
-                app.description,
-                color = AppColors.OnSurface.copy(alpha = 0.7f),
-                maxLines = 1,
-                style = MaterialTheme.typography.bodySmall
-            )
+            // --- ESPACIO EXTRA PARA COMPENSAR LA DESCRIPCIÓN ELIMINADA ---
+            Spacer(Modifier.height(16.dp))
 
-            // Botón de eliminar solo para apps agregadas manualmente
+            // 💡 RUTA DE INSTALACIÓN (Ahora aparece inmediatamente después del nombre)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = AppColors.SurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = app.path,
+                    color = AppColors.OnSurface.copy(alpha = 0.6f),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
+
+            // Botón de eliminar (si aplica)
             if (app.isCustom && onRemove != null) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(
@@ -209,14 +221,13 @@ fun AppCard(app: AppInfo, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
 
 @Composable
 fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
-    // Estados para los campos de entrada del diálogo
     var name by remember { mutableStateOf("") }
     var path by remember { mutableStateOf("") }
     var icon by remember { mutableStateOf("🎮") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.width(400.dp), // Ancho fijo para el diálogo
+            modifier = Modifier.width(400.dp),
             shape = RoundedCornerShape(20.dp),
             color = AppColors.Surface,
             tonalElevation = 10.dp
@@ -232,25 +243,40 @@ fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
                 )
 
                 OutlinedTextField(
-                    value = name, onValueChange = { name = it }, label = { Text("Nombre de la App") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent)
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Nombre de la App") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent
+                    )
                 )
                 OutlinedTextField(
-                    value = path, onValueChange = { path = it }, label = { Text("Ruta del ejecutable (C:\\...)") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent)
+                    value = path,
+                    onValueChange = { path = it },
+                    label = { Text("Ruta del ejecutable (C:\\...)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent
+                    )
                 )
                 OutlinedTextField(
-                    value = icon, onValueChange = { icon = it }, label = { Text("Emoji o Icono") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent)
+                    value = icon,
+                    onValueChange = { icon = it },
+                    label = { Text("Emoji o Icono") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent
+                    )
                 )
 
                 Spacer(Modifier.height(8.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Botón de cancelar
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text("Cancelar")
+                    }
 
-                    // Botón de confirmar
                     Button(
                         onClick = {
                             if (name.isNotBlank() && path.isNotBlank())
@@ -274,13 +300,30 @@ fun EmptyView() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("🔍", style = MaterialTheme.typography.displayLarge)
             Spacer(Modifier.height(8.dp))
-            Text("No se encontraron aplicaciones",
+            Text(
+                "No se encontraron aplicaciones",
                 color = AppColors.OnSurface,
                 style = MaterialTheme.typography.titleLarge
             )
-            Text("Intenta otra búsqueda o agrega una nueva manualmente.",
+            Text(
+                "Intenta otra búsqueda o agrega una nueva manualmente.",
                 color = AppColors.OnSurface.copy(alpha = 0.7f),
                 style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
+fun LoadingView() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = AppColors.Primary)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Escaneando aplicaciones...",
+                color = AppColors.OnSurface,
+                style = MaterialTheme.typography.titleMedium
             )
         }
     }

@@ -3,9 +3,14 @@ package com.oscarrial.gamelauncher.viewmodel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.oscarrial.gamelauncher.data.AppInfo // Importa el modelo
-import com.oscarrial.gamelauncher.data.sampleApps // Importa los datos de prueba
-import com.oscarrial.gamelauncher.system.PlatformService // Importa el servicio de sistema
+import com.oscarrial.gamelauncher.data.AppInfo
+import com.oscarrial.gamelauncher.system.AppScanner
+import com.oscarrial.gamelauncher.system.OperatingSystem
+import com.oscarrial.gamelauncher.system.PlatformService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
@@ -13,54 +18,92 @@ import java.io.IOException
  */
 class LauncherViewModel {
 
-    // ESTADO 1: Lista de aplicaciones. Inicializada con datos de prueba.
-    var apps by mutableStateOf(sampleApps())
+    // 🔧 FIX: Usar Main como dispatcher principal
+    private val viewModelScope = CoroutineScope(Dispatchers.Main)
+
+    // ESTADOS
+    var apps by mutableStateOf(emptyList<AppInfo>())
         private set
 
-    // ESTADO 2: Query de búsqueda.
     var searchQuery by mutableStateOf("")
         private set
 
-    // Lógica para filtrar las apps basándose en la búsqueda
+    var isLoading by mutableStateOf(true)
+        private set
+
+    init {
+        loadApps()
+    }
+
+    // Lógica para filtrar las apps (getter)
     val filteredApps: List<AppInfo>
         get() = apps.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
+    /**
+     * 🔧 FIX: Carga las aplicaciones ASÍNCRONAMENTE correctamente
+     */
+    private fun loadApps() {
+        viewModelScope.launch {
+            try {
+                // Ejecutar el escaneo en el hilo de I/O
+                val scannedApps = withContext(Dispatchers.IO) {
+                    AppScanner.scanSystemApps(OperatingSystem.Windows)
+                }
 
-    // ACCIÓN 1: Actualizar la búsqueda
-    fun updateSearchQuery(query: String) {
-        searchQuery = query
-        // Aquí no necesitamos actualizar 'apps' porque filteredApps es un 'getter'
-        // que se recalcula automáticamente cuando se accede.
-    }
+                // ✅ Actualización en el hilo Main (automático porque viewModelScope usa Main)
+                apps = scannedApps
+                println("✅ Apps cargadas correctamente. Total: ${apps.size}")
 
-    // ACCIÓN 2: Lógica de lanzamiento de la aplicación (implementada de forma simple).
-    fun launchApp(app: AppInfo) {
-        val launchPrefix = PlatformService.getLaunchPrefix()
-        val fullCommand = launchPrefix + app.path
+            } catch (e: Exception) {
+                println("❌ ERROR en el escaneo: ${e.message}")
+                e.printStackTrace()
+                apps = emptyList()
 
-        println("--- EJECUTANDO COMANDO: $fullCommand")
-
-        try {
-            // Requisito del proyecto: Usar ProcessBuilder
-            ProcessBuilder(*fullCommand.split(" ").toTypedArray()).start()
-
-        } catch (e: IOException) {
-            println("ERROR al lanzar ${app.name}: ${e.message}. Verifique la ruta del ejecutable.")
-            // TO-DO: Mostrar un mensaje de error visible en la UI.
+            } finally {
+                // Siempre desactivar el loading
+                isLoading = false
+            }
         }
     }
 
-    // ACCIÓN 3: Añadir una aplicación (por ahora solo actualiza la lista local)
-    fun addApp(app: AppInfo) {
-        apps = apps + app
+    // --- ACCIONES ---
+
+    fun updateSearchQuery(query: String) {
+        searchQuery = query
     }
 
-    // ACCIÓN 4: Eliminar una aplicación (solo las añadidas manualmente)
+    fun launchApp(app: AppInfo) {
+        val os = PlatformService.getCurrentOS()
+
+        val command: List<String> = if (os == OperatingSystem.Windows) {
+            listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
+        } else {
+            listOf("/bin/bash", "-c", app.path)
+        }
+
+        println("🚀 Lanzando: ${app.name}")
+        println("📝 Comando: ${command.joinToString(" ")}")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ProcessBuilder(command).start()
+            } catch (e: IOException) {
+                println("❌ ERROR: No se pudo lanzar ${app.name}")
+                println("Ruta: ${app.path}")
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun addApp(app: AppInfo) {
+        apps = apps + app
+        println("✅ App añadida: ${app.name}")
+    }
+
     fun removeApp(app: AppInfo) {
         if (app.isCustom) {
             apps = apps - app
+            println("🗑️ App eliminada: ${app.name}")
         }
     }
-
-    // TO-DO: Aquí es donde la Lógica de Escaneo se integrará en el próximo commit.
 }
