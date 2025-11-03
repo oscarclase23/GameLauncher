@@ -14,7 +14,7 @@ enum class OperatingSystem {
  * Clase de utilidad para identificar y proporcionar información
  * del sistema operativo actual.
  */
-object IdentificarOS {
+object PlatformService {
 
     /**
      * Detecta el sistema operativo actual basándose en la propiedad 'os.name'.

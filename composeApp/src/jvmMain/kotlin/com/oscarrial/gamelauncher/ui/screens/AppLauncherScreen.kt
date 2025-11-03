@@ -17,34 +17,21 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.oscarrial.gamelauncher.ui.theme.AppColors // Necesitas haber creado el archivo de colores
-
-// ----------- MODELO DE DATOS BÁSICO -----------
-/**
- * Clase de datos para representar la información de una aplicación/juego.
- * Es el modelo que usaremos, por ahora hardcodeado.
- */
-data class AppInfo(
-    val name: String,
-    val path: String,
-    val icon: String = "🎮",
-    val description: String = "",
-    val isCustom: Boolean = false // Indica si la app fue agregada manualmente
-)
+import com.oscarrial.gamelauncher.ui.theme.AppColors
+import com.oscarrial.gamelauncher.viewmodel.LauncherViewModel
+import com.oscarrial.gamelauncher.data.AppInfo
 
 // ----------- COMPOSABLE PRINCIPAL DE LA PANTALLA -----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SimpleAppLauncherScreen() {
-    // Estado local para la lista de aplicaciones (inicialmente con datos de prueba)
-    var apps by remember { mutableStateOf(sampleApps()) }
-    // Estado para la barra de búsqueda
-    var searchQuery by remember { mutableStateOf("") }
-    // Estado para mostrar el diálogo de añadir app
-    var showAddDialog by remember { mutableStateOf(false) }
+fun AppLauncherScreen() {
+    // 1. INICIALIZAR EL VIEWMODEL: Centraliza la lógica y el estado.
+    val viewModel = remember { LauncherViewModel() }
 
-    // Lógica simple de filtrado por nombre
-    val filteredApps = apps.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    // 2. OBTENER ESTADOS Y LÓGICA DEL VIEWMODEL:
+    val filteredApps = viewModel.filteredApps
+    val searchQuery = viewModel.searchQuery
+    var showAddDialog by remember { mutableStateOf(false) } // Este estado sigue siendo de la UI (solo afecta al diálogo)
 
     Box(
         modifier = Modifier
@@ -78,7 +65,7 @@ fun SimpleAppLauncherScreen() {
             // --- 2. SEARCH BAR ---
             SearchBar(
                 query = searchQuery,
-                onQueryChange = { searchQuery = it }
+                onQueryChange = viewModel::updateSearchQuery
             )
 
             Spacer(Modifier.height(24.dp)) // Aumentado el espacio para la rejilla
@@ -97,15 +84,8 @@ fun SimpleAppLauncherScreen() {
                     items(filteredApps, key = { it.name }) { app ->
                         AppCard(
                             app = app,
-                            onClick = {
-                                // TO-DO: Aquí iría la llamada a ProcessBuilder
-                                println("Lanzar aplicación: ${app.name} (${app.path})")
-                            },
-                            onRemove = {
-                                // Permite remover solo las aplicaciones agregadas manualmente
-                                if (app.isCustom)
-                                    apps = apps - app
-                            }
+                            onClick = { viewModel.launchApp(app) },
+                            onRemove = { viewModel.removeApp(app) }
                         )
                     }
                 }
@@ -117,8 +97,7 @@ fun SimpleAppLauncherScreen() {
             AddAppDialog(
                 onDismiss = { showAddDialog = false },
                 onConfirm = { newApp ->
-                    // Agrega la nueva app a la lista
-                    apps = apps + newApp
+                    viewModel.addApp(newApp)
                     showAddDialog = false
                 }
             )
@@ -306,10 +285,3 @@ fun EmptyView() {
         }
     }
 }
-
-// ----------- DATOS DE PRUEBA HARDCODEADOS -----------
-fun sampleApps() = listOf(
-    AppInfo("Minecraft", "C:\\Games\\Minecraft.exe", "⛏️", "Explora mundos infinitos"),
-    AppInfo("Visual Studio Code", "C:\\Program Files\\VSCode\\Code.exe", "💻", "Editor de código"),
-    AppInfo("Spotify", "C:\\Program Files\\Spotify\\Spotify.exe", "🎵", "Música para todos los gustos")
-)
