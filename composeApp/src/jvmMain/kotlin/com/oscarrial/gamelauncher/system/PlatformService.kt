@@ -1,4 +1,4 @@
-package com.oscarrial.gamelauncher
+package com.oscarrial.gamelauncher.system
 
 /**
  * Define las plataformas de sistema operativo que soporta la aplicación.

@@ -2,6 +2,7 @@ package com.oscarrial.gamelauncher
 
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import com.oscarrial.gamelauncher.system.IdentificarOS
 import com.oscarrial.gamelauncher.ui.screens.SimpleAppLauncherScreen // Asegúrate de que esta importación sea correcta
 import com.oscarrial.gamelauncher.ui.theme.GameLauncherTheme // Importa tu tema
 
