@@ -151,13 +151,18 @@ object AppScanner {
     fun scanWindowsApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
+        println("🔍 Iniciando escaneo de aplicaciones de Windows...")
+
         // 1. Buscar aplicaciones del sistema (calculadora, paint, etc.)
+        println("📂 Escaneando aplicaciones del sistema...")
         foundApps.addAll(scanSystemApps())
 
         // 2. Buscar aplicaciones conocidas primero (más rápido y preciso)
+        println("🎯 Escaneando aplicaciones conocidas...")
         foundApps.addAll(scanKnownApps())
 
         // 3. Escanear carpetas normales
+        println("📁 Escaneando carpetas de programas...")
         for (basePath in ALL_WINDOWS_PATHS) {
             val baseDir = File(basePath)
             if (baseDir.exists() && baseDir.isDirectory) {
@@ -168,6 +173,8 @@ object AppScanner {
                 }
             }
         }
+
+        println("✅ Escaneo completado. Se encontraron ${foundApps.size} aplicaciones.")
 
         return foundApps
             .distinctBy { it.path.lowercase() }
@@ -342,6 +349,7 @@ object AppScanner {
 
     /**
      * Crea un AppInfo desde un archivo ejecutable.
+     * NUEVA VERSIÓN: Extrae el icono real del .exe
      */
     private fun createAppInfoFromFile(file: File, folderName: String? = null): AppInfo {
         val name = (folderName ?: file.nameWithoutExtension)
@@ -350,16 +358,32 @@ object AppScanner {
             .split(" ")
             .joinToString(" ") { it.capitalize() }
 
+        // 🎨 EXTRACCIÓN DEL ICONO REAL (64x64 para mejor calidad)
+        println("  🎨 Extrayendo icono de: ${file.name}")
+        val iconBytes = try {
+            IconExtractor.extractIconAsBytes(file.absolutePath, size = 64)
+        } catch (e: Exception) {
+            println("  ⚠️ Error extrayendo icono de ${file.name}: ${e.message}")
+            null
+        }
+
+        if (iconBytes != null) {
+            println("  ✅ Icono extraído correctamente (${iconBytes.size} bytes)")
+        } else {
+            println("  ⚠️ No se pudo extraer el icono, usando fallback")
+        }
+
         return AppInfo(
             name = name,
             path = file.absolutePath,
-            icon = getIconForApp(name),
-            description = "Aplicación de Windows"
+            icon = getIconForApp(name), // Emoji como fallback
+            description = "Aplicación de Windows",
+            iconBytes = iconBytes // ✨ NUEVO: Bytes del icono real
         )
     }
 
     /**
-     * Obtiene el icono apropiado para una aplicación.
+     * Obtiene el icono apropiado para una aplicación (FALLBACK de emojis).
      */
     private fun getIconForApp(name: String): String {
         val normalized = name.lowercase().replace(" ", "")

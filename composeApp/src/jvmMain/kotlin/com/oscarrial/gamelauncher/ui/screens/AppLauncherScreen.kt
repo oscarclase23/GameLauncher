@@ -1,34 +1,34 @@
 package com.oscarrial.gamelauncher.ui.screens
 
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.oscarrial.gamelauncher.ui.theme.AppColors
 import com.oscarrial.gamelauncher.viewmodel.LauncherViewModel
 import com.oscarrial.gamelauncher.data.AppInfo
+import com.oscarrial.gamelauncher.system.IconExtractor
+import org.jetbrains.skia.Image as SkiaImage
 
 // ----------- COMPOSABLE PRINCIPAL DE LA PANTALLA -----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppLauncherScreen() {
-    // 1. INICIALIZAR EL VIEWMODEL: Centraliza la lógica y el estado.
     val viewModel = remember { LauncherViewModel() }
 
-    // 2. OBTENER ESTADOS Y LÓGICA DEL VIEWMODEL:
     val filteredApps = viewModel.filteredApps
     val searchQuery = viewModel.searchQuery
     var showAddDialog by remember { mutableStateOf(false) }
@@ -38,7 +38,7 @@ fun AppLauncherScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(AppColors.Background)
-            .padding(16.dp)
+            .padding(24.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -50,18 +50,19 @@ fun AppLauncherScreen() {
             ) {
                 Text(
                     "🎮 Lanzador de Aplicaciones",
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     color = AppColors.OnBackground
                 )
                 Button(
                     onClick = { showAddDialog = true },
-                    colors = ButtonDefaults.buttonColors(AppColors.Primary)
+                    colors = ButtonDefaults.buttonColors(AppColors.Primary),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Text("➕ Añadir App", color = AppColors.OnPrimary)
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
             // --- 2. SEARCH BAR ---
             SearchBar(
@@ -71,28 +72,32 @@ fun AppLauncherScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            // --- 3. GRID DE APPS (Contenido principal con manejo de carga) ---
-
+            // --- 3. LISTA DE APPS ---
             if (isLoading) {
                 LoadingView()
             } else if (filteredApps.isEmpty()) {
                 EmptyView()
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 280.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    modifier = Modifier.fillMaxSize()
+                // Header de la tabla
+                AppListHeader()
+
+                Spacer(Modifier.height(8.dp))
+
+                // Lista scrolleable de apps
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 🔧 FIX: Usar path como key única en lugar de name
                     items(
                         items = filteredApps,
-                        key = { it.path } // ✅ Cada path es único
+                        key = { it.path }
                     ) { app ->
-                        AppCard(
+                        AppListItem(
                             app = app,
-                            onClick = { viewModel.launchApp(app) },
-                            onRemove = { viewModel.removeApp(app) }
+                            onLaunch = { viewModel.launchApp(app) },
+                            onRemove = if (app.isCustom) {
+                                { viewModel.removeApp(app) }
+                            } else null
                         )
                     }
                 }
@@ -112,7 +117,183 @@ fun AppLauncherScreen() {
     }
 }
 
-// ----------- COMPONENTES ADICIONALES -----------
+// ----------- HEADER DE LA LISTA -----------
+@Composable
+fun AppListHeader() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = AppColors.Surface,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Columna del icono
+            Box(
+                modifier = Modifier.width(80.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Icono",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = AppColors.OnSurface.copy(alpha = 0.7f)
+                )
+            }
+
+            // Columna del nombre
+            Box(modifier = Modifier.weight(0.3f).padding(start = 12.dp)) {
+                Text(
+                    "Nombre",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = AppColors.OnSurface.copy(alpha = 0.7f)
+                )
+            }
+
+            // Columna de la ruta
+            Box(modifier = Modifier.weight(0.5f).padding(start = 12.dp)) {
+                Text(
+                    "Ruta de instalación",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = AppColors.OnSurface.copy(alpha = 0.7f)
+                )
+            }
+
+            // Columna de acciones
+            Box(modifier = Modifier.width(160.dp)) {
+                // Espacio vacío para alinear con los botones
+            }
+        }
+    }
+}
+
+// ----------- ITEM DE LA LISTA -----------
+@Composable
+fun AppListItem(
+    app: AppInfo,
+    onLaunch: () -> Unit,
+    onRemove: (() -> Unit)? = null
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .hoverable(interactionSource),
+        shape = RoundedCornerShape(12.dp),
+        color = if (hovered) AppColors.Surface.copy(alpha = 0.8f) else AppColors.Surface,
+        tonalElevation = if (hovered) 4.dp else 2.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // --- 1. ICONO (MÁS GRANDE Y CENTRADO) ---
+            Box(
+                modifier = Modifier
+                    .width(80.dp)
+                    .height(64.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (app.iconBytes != null) {
+                    // Mostrar icono real extraído (64x64)
+                    AppIcon(iconBytes = app.iconBytes, size = 64)
+                } else {
+                    // Fallback al emoji
+                    Text(
+                        text = app.icon,
+                        style = MaterialTheme.typography.displayLarge
+                    )
+                }
+            }
+
+            // --- 2. NOMBRE ---
+            Text(
+                text = app.name,
+                modifier = Modifier.weight(0.3f).padding(start = 12.dp),
+                style = MaterialTheme.typography.titleMedium,
+                color = AppColors.OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // --- 3. RUTA ---
+            Text(
+                text = app.path,
+                modifier = Modifier.weight(0.5f).padding(start = 12.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AppColors.OnSurface.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // --- 4. BOTONES DE ACCIÓN ---
+            Row(
+                modifier = Modifier.width(160.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Botón Lanzar
+                Button(
+                    onClick = onLaunch,
+                    colors = ButtonDefaults.buttonColors(AppColors.Primary),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text("▶ Lanzar", style = MaterialTheme.typography.labelMedium)
+                }
+
+                // Botón Eliminar (solo para apps custom)
+                if (onRemove != null) {
+                    IconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text("🗑️", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ----------- COMPOSABLE PARA MOSTRAR EL ICONO -----------
+@Composable
+fun AppIcon(iconBytes: ByteArray, size: Int = 48) {
+    val imageBitmap = remember(iconBytes) {
+        try {
+            val skiaImage = SkiaImage.makeFromEncoded(iconBytes)
+            skiaImage.toComposeImageBitmap()
+        } catch (e: Exception) {
+            println("Error cargando icono: ${e.message}")
+            null
+        }
+    }
+
+    if (imageBitmap != null) {
+        Image(
+            painter = BitmapPainter(imageBitmap),
+            contentDescription = "App Icon",
+            modifier = Modifier
+                .size(size.dp)
+                .clip(RoundedCornerShape(8.dp))
+        )
+    } else {
+        // Fallback: mostrar un icono genérico
+        Box(
+            modifier = Modifier
+                .size(size.dp)
+                .background(AppColors.SurfaceVariant, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🎮", style = MaterialTheme.typography.titleLarge)
+        }
+    }
+}
+
+// ----------- OTROS COMPONENTES -----------
 
 @Composable
 fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
@@ -122,11 +303,11 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
         color = AppColors.SurfaceVariant
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("🔍", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(12.dp))
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
@@ -136,7 +317,7 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                 cursorBrush = SolidColor(AppColors.Primary),
                 decorationBox = { inner ->
                     if (query.isEmpty()) Text(
-                        "Buscar apps (ej: chrome, spotify, code)...",
+                        "Buscar aplicaciones...",
                         color = AppColors.OnSurface.copy(alpha = 0.5f)
                     )
                     inner()
@@ -152,82 +333,13 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-fun AppCard(app: AppInfo, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val hovered by interactionSource.collectIsHoveredAsState()
-    val scale by animateFloatAsState(if (hovered) 1.02f else 1f, spring(dampingRatio = 0.8f))
-
-    Card(
-        modifier = Modifier
-            .heightIn(min = 200.dp)
-            .scale(scale)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (hovered) 8.dp else 4.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Icono
-            Text(text = app.icon, style = MaterialTheme.typography.displayMedium)
-            Spacer(Modifier.height(12.dp))
-
-            // Nombre de la app
-            Text(
-                text = app.name,
-                color = AppColors.OnSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            // --- ESPACIO EXTRA PARA COMPENSAR LA DESCRIPCIÓN ELIMINADA ---
-            Spacer(Modifier.height(16.dp))
-
-            // 💡 RUTA DE INSTALACIÓN (Ahora aparece inmediatamente después del nombre)
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = AppColors.SurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = app.path,
-                    color = AppColors.OnSurface.copy(alpha = 0.6f),
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(8.dp)
-                )
-            }
-
-            // Botón de eliminar (si aplica)
-            if (app.isCustom && onRemove != null) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = onRemove,
-                    border = BorderStroke(1.dp, AppColors.Error),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text("🗑️ Eliminar", color = AppColors.Error, style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var path by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf("🎮") }
+    var selectedPath by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.width(400.dp),
+            modifier = Modifier.width(500.dp),
             shape = RoundedCornerShape(20.dp),
             color = AppColors.Surface,
             tonalElevation = 10.dp
@@ -242,33 +354,123 @@ fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
                     color = AppColors.OnSurface
                 )
 
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Nombre de la App") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent
-                    )
+                Text(
+                    "Selecciona el archivo ejecutable (.exe) de la aplicación",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AppColors.OnSurface.copy(alpha = 0.7f)
                 )
-                OutlinedTextField(
-                    value = path,
-                    onValueChange = { path = it },
-                    label = { Text("Ruta del ejecutable (C:\\...)") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent
+
+                // Campo de ruta con botón de explorar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = selectedPath,
+                        onValueChange = {
+                            selectedPath = it
+                            errorMessage = ""
+                        },
+                        label = { Text("Ruta del ejecutable") },
+                        modifier = Modifier.weight(1f),
+                        readOnly = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent
+                        ),
+                        supportingText = if (errorMessage.isNotEmpty()) {
+                            { Text(errorMessage, color = AppColors.Error) }
+                        } else null
                     )
-                )
-                OutlinedTextField(
-                    value = icon,
-                    onValueChange = { icon = it },
-                    label = { Text("Emoji o Icono") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent
-                    )
-                )
+
+                    Button(
+                        onClick = {
+                            // Abrir selector de archivos
+                            val fileChooser = javax.swing.JFileChooser()
+                            fileChooser.dialogTitle = "Seleccionar ejecutable"
+                            fileChooser.fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
+
+                            // Filtro para solo mostrar .exe
+                            fileChooser.fileFilter = object : javax.swing.filechooser.FileFilter() {
+                                override fun accept(f: java.io.File): Boolean {
+                                    return f.isDirectory || f.name.endsWith(".exe", ignoreCase = true)
+                                }
+                                override fun getDescription(): String = "Archivos ejecutables (*.exe)"
+                            }
+
+                            val result = fileChooser.showOpenDialog(null)
+                            if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                selectedPath = fileChooser.selectedFile.absolutePath
+                                errorMessage = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(AppColors.Primary),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text("📁 Explorar")
+                    }
+                }
+
+                // Preview del icono si hay una ruta seleccionada
+                if (selectedPath.isNotEmpty()) {
+                    val file = remember(selectedPath) { java.io.File(selectedPath) }
+
+                    if (file.exists() && file.name.endsWith(".exe", ignoreCase = true)) {
+                        val iconBytes = remember(selectedPath) {
+                            IconExtractor.extractIconAsBytes(selectedPath, size = 64)
+                        }
+
+                        val appName = remember(selectedPath) {
+                            file.nameWithoutExtension
+                                .replace("-", " ")
+                                .replace("_", " ")
+                                .split(" ")
+                                .joinToString(" ") { it.replaceFirstChar { c ->
+                                    if (c.isLowerCase()) c.titlecase() else c.toString()
+                                }}
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = AppColors.SurfaceVariant.copy(alpha = 0.3f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Icono preview
+                                Box(
+                                    modifier = Modifier.size(64.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (iconBytes != null) {
+                                        AppIcon(iconBytes = iconBytes, size = 64)
+                                    } else {
+                                        Text("🎮", style = MaterialTheme.typography.displayMedium)
+                                    }
+                                }
+
+                                Column {
+                                    Text(
+                                        "Vista previa:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AppColors.OnSurface.copy(alpha = 0.6f)
+                                    )
+                                    Text(
+                                        appName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = AppColors.OnSurface
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        errorMessage = "El archivo no existe o no es un ejecutable válido"
+                    }
+                }
 
                 Spacer(Modifier.height(8.dp))
 
@@ -279,11 +481,36 @@ fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
 
                     Button(
                         onClick = {
-                            if (name.isNotBlank() && path.isNotBlank())
-                                onConfirm(AppInfo(name, path, icon, isCustom = true, description = "Añadida manualmente"))
+                            val file = java.io.File(selectedPath)
+                            if (file.exists() && file.name.endsWith(".exe", ignoreCase = true)) {
+                                // Extraer nombre automáticamente
+                                val appName = file.nameWithoutExtension
+                                    .replace("-", " ")
+                                    .replace("_", " ")
+                                    .split(" ")
+                                    .joinToString(" ") { it.replaceFirstChar { c ->
+                                        if (c.isLowerCase()) c.titlecase() else c.toString()
+                                    }}
+
+                                // Extraer icono automáticamente
+                                val iconBytes = IconExtractor.extractIconAsBytes(selectedPath, size = 64)
+
+                                onConfirm(
+                                    AppInfo(
+                                        name = appName,
+                                        path = selectedPath,
+                                        icon = "🎮", // Fallback
+                                        isCustom = true,
+                                        description = "Añadida manualmente",
+                                        iconBytes = iconBytes
+                                    )
+                                )
+                            } else {
+                                errorMessage = "Selecciona un archivo .exe válido"
+                            }
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = name.isNotBlank() && path.isNotBlank(),
+                        enabled = selectedPath.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(AppColors.Primary)
                     ) {
                         Text("Agregar", color = AppColors.OnPrimary)
@@ -321,7 +548,7 @@ fun LoadingView() {
             CircularProgressIndicator(color = AppColors.Primary)
             Spacer(Modifier.height(16.dp))
             Text(
-                "Escaneando aplicaciones...",
+                "Escaneando aplicaciones y extrayendo iconos...",
                 color = AppColors.OnSurface,
                 style = MaterialTheme.typography.titleMedium
             )
