@@ -136,11 +136,18 @@ object AppScanner {
         "/usr/share/applications",
         "/usr/local/share/applications",
         "$USER_HOME/.local/share/applications",
-        "/var/lib/flatpak/exports/share/applications",
-        "$USER_HOME/.local/share/flatpak/exports/share/applications"
+        // "/var/lib/flatpak/exports/share/applications", // Descomentar si se desea incluir Flatpaks
+        // "$USER_HOME/.local/share/flatpak/exports/share/applications"
     )
 
-    // ==================== FUNCIÓN PÚBLICA PRINCIPAL ====================
+    // Lista de ejecutables de sistema esenciales en Linux (análoga a SYSTEM_APPS de Windows)
+    private val LINUX_SYSTEM_APPS = listOf(
+        "firefox", "chrome", "chromium", "gnome-calculator", "gimp", "inkscape",
+        "vlc", "rhythmbox", "terminal", "gedit", "code", "idea", "pycharm",
+        "thunderbird", "libreoffice", "shotwell", "steam", "minecraft-launcher"
+    )
+
+// ==================== FUNCIÓN PÚBLICA PRINCIPAL ====================
 
     /**
      * Función principal que escanea aplicaciones según el sistema operativo detectado.
@@ -413,10 +420,11 @@ object AppScanner {
         }
     }
 
-    // ==================== LINUX SCANNING ====================
+// ==================== LINUX SCANNING MODIFICADO ====================
 
     /**
-     * Escanea aplicaciones de Linux analizando archivos .desktop
+     * Escanea aplicaciones de Linux analizando archivos .desktop,
+     * filtrando por apps útiles y aquellas con iconos.
      */
     private fun scanLinuxApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
@@ -449,35 +457,32 @@ object AppScanner {
     }
 
     /**
-     * Parsea un archivo .desktop de Linux
+     * Parsea un archivo .desktop de Linux y filtra.
      */
     private fun parseDesktopFile(desktopFile: File): AppInfo? {
         var name: String? = null
         var exec: String? = null
         var iconName: String? = null
         var comment: String? = null
+        var categories: String? = null // Usaremos esto para filtrar
+        var isHidden = false
 
         desktopFile.readLines().forEach { line ->
             val trimmedLine = line.trim()
 
             when {
-                trimmedLine.startsWith("Name=") && name == null -> {
-                    name = trimmedLine.substringAfter("Name=")
-                }
-                trimmedLine.startsWith("Exec=") -> {
-                    exec = trimmedLine.substringAfter("Exec=")
-                }
-                trimmedLine.startsWith("Icon=") -> {
-                    iconName = trimmedLine.substringAfter("Icon=")
-                }
-                trimmedLine.startsWith("Comment=") -> {
-                    comment = trimmedLine.substringAfter("Comment=")
-                }
+                trimmedLine.startsWith("Name=") && name == null -> name = trimmedLine.substringAfter("Name=")
+                trimmedLine.startsWith("Exec=") -> exec = trimmedLine.substringAfter("Exec=")
+                trimmedLine.startsWith("Icon=") -> iconName = trimmedLine.substringAfter("Icon=")
+                trimmedLine.startsWith("Comment=") -> comment = trimmedLine.substringAfter("Comment=")
+                trimmedLine.startsWith("Categories=") -> categories = trimmedLine.substringAfter("Categories=")
+                trimmedLine.startsWith("NoDisplay=") && trimmedLine.substringAfter("NoDisplay=").equals("true", ignoreCase = true) -> isHidden = true
+                trimmedLine.startsWith("Hidden=") && trimmedLine.substringAfter("Hidden=").equals("true", ignoreCase = true) -> isHidden = true
             }
         }
 
-        if (name.isNullOrBlank() || exec.isNullOrBlank()) {
-            return null
+        if (name.isNullOrBlank() || exec.isNullOrBlank() || isHidden) {
+            return null // Ignorar si falta nombre, ejecutable, o está oculto.
         }
 
         val cleanExec = exec!!
@@ -486,15 +491,32 @@ object AppScanner {
             .split(" ")
             .firstOrNull() ?: return null
 
-        val executablePath = resolveExecutablePath(cleanExec)
-        if (executablePath == null || !File(executablePath).exists()) {
-            return null
+        // 1. FILTRADO ESTRICTO: Ignorar handlers y agentes.
+        val isAgent = categories?.contains("Settings") == true || categories?.contains("Utility") == true
+        if (isAgent || cleanExec.contains("handler", ignoreCase = true) || cleanExec.contains("agent", ignoreCase = true)) {
+            // Permitir solo si está en la lista de apps conocidas
+            if (!LINUX_SYSTEM_APPS.any { cleanExec.contains(it, ignoreCase = true) }) {
+                return null
+            }
         }
 
+        // 2. Resolver y verificar ejecutable
+        val executablePath = resolveExecutablePath(cleanExec)
+        if (executablePath == null || !File(executablePath).exists()) {
+            return null // No se encontró el binario
+        }
+
+        // 3. Extracción de Icono y FILTRADO POR ICONO
         val iconBytes = if (!iconName.isNullOrBlank()) {
             IconExtractor.extractLinuxIcon(iconName!!)
         } else {
             null
+        }
+
+        // Si no hay icono, ignorar la aplicación para tener una lista más limpia (según tu petición)
+        if (iconBytes == null) {
+            println("  🚫 Aplicación sin icono ignorada: $name")
+            return null
         }
 
         println("  ✅ Aplicación encontrada: $name")
@@ -502,12 +524,11 @@ object AppScanner {
         return AppInfo(
             name = name!!,
             path = executablePath,
-            icon = "🎮",
+            icon = "🎮", // El emoji de fallback ya no es tan relevante si filtramos por iconBytes != null
             description = comment ?: "Aplicación de Linux",
             iconBytes = iconBytes
         )
     }
-
     /**
      * Resuelve la ruta completa de un ejecutable de Linux
      */

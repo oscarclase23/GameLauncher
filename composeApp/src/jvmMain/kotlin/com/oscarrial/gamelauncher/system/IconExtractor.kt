@@ -178,7 +178,7 @@ object IconExtractor {
             if (!file.exists()) return null
 
             val image = ImageIO.read(file) ?: return null
-            val scaledImage = scaleImageWithQuality(image, 128, 128)
+            val scaledImage = scaleImageWithQuality(image, 64, 64)
 
             val outputStream = java.io.ByteArrayOutputStream()
             ImageIO.write(scaledImage, "png", outputStream)
