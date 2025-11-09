@@ -16,22 +16,27 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.oscarrial.gamelauncher.ui.theme.AppColors
 import com.oscarrial.gamelauncher.viewmodel.LauncherViewModel
 import com.oscarrial.gamelauncher.data.AppInfo
 import com.oscarrial.gamelauncher.system.IconExtractor
 import org.jetbrains.skia.Image as SkiaImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import javax.swing.JFileChooser
+import javax.swing.UIManager
+import javax.swing.filechooser.FileNameExtensionFilter
+import java.io.File
 
-// ----------- COMPOSABLE PRINCIPAL DE LA PANTALLA -----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppLauncherScreen() {
     val viewModel = remember { LauncherViewModel() }
+    val scope = rememberCoroutineScope()
 
     val filteredApps = viewModel.filteredApps
     val searchQuery = viewModel.searchQuery
-    var showAddDialog by remember { mutableStateOf(false) }
     val isLoading = viewModel.isLoading
 
     Box(
@@ -42,7 +47,7 @@ fun AppLauncherScreen() {
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // --- 1. HEADER (Título y botón de Añadir App) ---
+            // Header con título y botón de añadir
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -54,7 +59,15 @@ fun AppLauncherScreen() {
                     color = AppColors.OnBackground
                 )
                 Button(
-                    onClick = { showAddDialog = true },
+                    onClick = {
+                        // Abrir explorador de archivos nativo de Windows
+                        scope.launch {
+                            val selectedApp = openNativeWindowsFileExplorer()
+                            if (selectedApp != null) {
+                                viewModel.addApp(selectedApp)
+                            }
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(AppColors.Primary),
                     shape = RoundedCornerShape(10.dp)
                 ) {
@@ -64,7 +77,7 @@ fun AppLauncherScreen() {
 
             Spacer(Modifier.height(20.dp))
 
-            // --- 2. SEARCH BAR ---
+            // Barra de búsqueda
             SearchBar(
                 query = searchQuery,
                 onQueryChange = viewModel::updateSearchQuery
@@ -72,18 +85,15 @@ fun AppLauncherScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            // --- 3. LISTA DE APPS ---
+            // Lista de aplicaciones
             if (isLoading) {
                 LoadingView()
             } else if (filteredApps.isEmpty()) {
                 EmptyView()
             } else {
-                // Header de la tabla
                 AppListHeader()
-
                 Spacer(Modifier.height(8.dp))
 
-                // Lista scrolleable de apps
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -103,21 +113,101 @@ fun AppLauncherScreen() {
                 }
             }
         }
-
-        // --- 4. DIÁLOGO PARA AÑADIR APP ---
-        if (showAddDialog) {
-            AddAppDialog(
-                onDismiss = { showAddDialog = false },
-                onConfirm = { newApp ->
-                    viewModel.addApp(newApp)
-                    showAddDialog = false
-                }
-            )
-        }
     }
 }
 
-// ----------- HEADER DE LA LISTA -----------
+/**
+ * Abre el explorador de archivos NATIVO de Windows y devuelve un AppInfo si se selecciona un .exe válido.
+ *
+ * Esta función garantiza que:
+ * 1. Se use el Look and Feel nativo de Windows
+ * 2. El diálogo sea idéntico al explorador de archivos del sistema
+ * 3. Solo muestre archivos .exe por defecto
+ * 4. Inicie en la carpeta de "Archivos de programa" para facilitar la búsqueda
+ */
+private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
+    try {
+        // CRÍTICO: Forzar el uso del Look and Feel nativo de Windows
+        // Esto hace que JFileChooser use el explorador de archivos nativo del sistema
+        UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
+
+        val fileChooser = JFileChooser().apply {
+            dialogTitle = "Seleccionar aplicación ejecutable"
+            fileSelectionMode = JFileChooser.FILES_ONLY
+
+            // Iniciar en la carpeta de Program Files (ubicación común de aplicaciones)
+            currentDirectory = File("C:\\Program Files")
+
+            // Filtro para mostrar SOLO archivos .exe
+            // Esto hace que el explorador se vea más limpio y enfocado
+            fileFilter = FileNameExtensionFilter(
+                "Archivos ejecutables (*.exe)",
+                "exe"
+            )
+
+            // Configuración adicional para apariencia nativa
+            isAcceptAllFileFilterUsed = false // No mostrar "Todos los archivos"
+            isMultiSelectionEnabled = false    // Solo un archivo a la vez
+        }
+
+        // Mostrar el diálogo NATIVO de Windows
+        val result = fileChooser.showOpenDialog(null)
+
+        if (result == JFileChooser.APPROVE_OPTION) {
+            val selectedFile = fileChooser.selectedFile
+
+            // Validar que sea un archivo .exe válido
+            if (selectedFile.exists() && selectedFile.name.endsWith(".exe", ignoreCase = true)) {
+
+                // Extraer nombre automáticamente del archivo
+                val appName = selectedFile.nameWithoutExtension
+                    .replace("-", " ")
+                    .replace("_", " ")
+                    .split(" ")
+                    .joinToString(" ") { word ->
+                        word.replaceFirstChar { it.uppercase() }
+                    }
+
+                println("📂 Archivo seleccionado: ${selectedFile.name}")
+                println("🎯 Extrayendo icono de alta calidad...")
+
+                // Extraer icono de alta calidad (128x128 con escalado inteligente)
+                val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = 128)
+
+                if (iconBytes != null) {
+                    println("✅ Icono extraído correctamente (${iconBytes.size} bytes)")
+                } else {
+                    println("⚠️ No se pudo extraer el icono, se usará fallback")
+                }
+
+                // Crear el AppInfo con toda la información
+                AppInfo(
+                    name = appName,
+                    path = selectedFile.absolutePath,
+                    icon = "🎮", // Emoji fallback
+                    isCustom = true,
+                    description = "Añadida manualmente",
+                    iconBytes = iconBytes
+                )
+            } else {
+                println("❌ El archivo seleccionado no es válido")
+                null
+            }
+        } else {
+            println("🚫 Selección cancelada por el usuario")
+            null
+        }
+    } catch (e: Exception) {
+        println("❌ Error abriendo explorador de archivos: ${e.message}")
+        e.printStackTrace()
+        null
+    }
+}
+
+// ============================================================================
+// COMPONENTES DE UI
+// ============================================================================
+
 @Composable
 fun AppListHeader() {
     Surface(
@@ -130,9 +220,9 @@ fun AppListHeader() {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Columna del icono
+            // Columna del icono (más ancha para iconos grandes)
             Box(
-                modifier = Modifier.width(80.dp),
+                modifier = Modifier.width(100.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -162,13 +252,12 @@ fun AppListHeader() {
 
             // Columna de acciones
             Box(modifier = Modifier.width(160.dp)) {
-                // Espacio vacío para alinear con los botones
+                // Espacio para botones
             }
         }
     }
 }
 
-// ----------- ITEM DE LA LISTA -----------
 @Composable
 fun AppListItem(
     app: AppInfo,
@@ -190,18 +279,17 @@ fun AppListItem(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // --- 1. ICONO (MÁS GRANDE Y CENTRADO) ---
+            // Icono de alta calidad (128x128 escalado a 80dp)
             Box(
                 modifier = Modifier
-                    .width(80.dp)
-                    .height(64.dp),
+                    .width(100.dp)
+                    .height(80.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (app.iconBytes != null) {
-                    // Mostrar icono real extraído (64x64)
-                    AppIcon(iconBytes = app.iconBytes, size = 64)
+                    AppIcon(iconBytes = app.iconBytes, size = 80)
                 } else {
-                    // Fallback al emoji
+                    // Fallback: emoji grande
                     Text(
                         text = app.icon,
                         style = MaterialTheme.typography.displayLarge
@@ -209,7 +297,7 @@ fun AppListItem(
                 }
             }
 
-            // --- 2. NOMBRE ---
+            // Nombre de la aplicación
             Text(
                 text = app.name,
                 modifier = Modifier.weight(0.3f).padding(start = 12.dp),
@@ -219,7 +307,7 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // --- 3. RUTA ---
+            // Ruta de instalación
             Text(
                 text = app.path,
                 modifier = Modifier.weight(0.5f).padding(start = 12.dp),
@@ -229,7 +317,7 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // --- 4. BOTONES DE ACCIÓN ---
+            // Botones de acción
             Row(
                 modifier = Modifier.width(160.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -259,9 +347,12 @@ fun AppListItem(
     }
 }
 
-// ----------- COMPOSABLE PARA MOSTRAR EL ICONO -----------
+/**
+ * Componente que renderiza un icono de aplicación de alta calidad.
+ * Maneja correctamente la carga y el escalado de los iconos extraídos.
+ */
 @Composable
-fun AppIcon(iconBytes: ByteArray, size: Int = 48) {
+fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
     val imageBitmap = remember(iconBytes) {
         try {
             val skiaImage = SkiaImage.makeFromEncoded(iconBytes)
@@ -274,14 +365,14 @@ fun AppIcon(iconBytes: ByteArray, size: Int = 48) {
 
     if (imageBitmap != null) {
         Image(
-            painter = BitmapPainter(imageBitmap),
-            contentDescription = "App Icon",
-            modifier = Modifier
-                .size(size.dp)
-                .clip(RoundedCornerShape(8.dp))
-        )
+        painter = BitmapPainter(imageBitmap),
+        contentDescription = "App Icon",
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp)), // quitamos .size()
+        contentScale = androidx.compose.ui.layout.ContentScale.None // sin reescalar
+    )
     } else {
-        // Fallback: mostrar un icono genérico
+        // Fallback: icono genérico
         Box(
             modifier = Modifier
                 .size(size.dp)
@@ -292,8 +383,6 @@ fun AppIcon(iconBytes: ByteArray, size: Int = 48) {
         }
     }
 }
-
-// ----------- OTROS COMPONENTES -----------
 
 @Composable
 fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
@@ -316,205 +405,18 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                 singleLine = true,
                 cursorBrush = SolidColor(AppColors.Primary),
                 decorationBox = { inner ->
-                    if (query.isEmpty()) Text(
-                        "Buscar aplicaciones...",
-                        color = AppColors.OnSurface.copy(alpha = 0.5f)
-                    )
+                    if (query.isEmpty()) {
+                        Text(
+                            "Buscar aplicaciones...",
+                            color = AppColors.OnSurface.copy(alpha = 0.5f)
+                        )
+                    }
                     inner()
                 }
             )
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
                     Text("❌")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun AddAppDialog(onDismiss: () -> Unit, onConfirm: (AppInfo) -> Unit) {
-    var selectedPath by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf("") }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.width(500.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = AppColors.Surface,
-            tonalElevation = 10.dp
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    "➕ Agregar Nueva Aplicación",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = AppColors.OnSurface
-                )
-
-                Text(
-                    "Selecciona el archivo ejecutable (.exe) de la aplicación",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AppColors.OnSurface.copy(alpha = 0.7f)
-                )
-
-                // Campo de ruta con botón de explorar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = selectedPath,
-                        onValueChange = {
-                            selectedPath = it
-                            errorMessage = ""
-                        },
-                        label = { Text("Ruta del ejecutable") },
-                        modifier = Modifier.weight(1f),
-                        readOnly = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent
-                        ),
-                        supportingText = if (errorMessage.isNotEmpty()) {
-                            { Text(errorMessage, color = AppColors.Error) }
-                        } else null
-                    )
-
-                    Button(
-                        onClick = {
-                            // Abrir selector de archivos
-                            val fileChooser = javax.swing.JFileChooser()
-                            fileChooser.dialogTitle = "Seleccionar ejecutable"
-                            fileChooser.fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
-
-                            // Filtro para solo mostrar .exe
-                            fileChooser.fileFilter = object : javax.swing.filechooser.FileFilter() {
-                                override fun accept(f: java.io.File): Boolean {
-                                    return f.isDirectory || f.name.endsWith(".exe", ignoreCase = true)
-                                }
-                                override fun getDescription(): String = "Archivos ejecutables (*.exe)"
-                            }
-
-                            val result = fileChooser.showOpenDialog(null)
-                            if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
-                                selectedPath = fileChooser.selectedFile.absolutePath
-                                errorMessage = ""
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(AppColors.Primary),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text("📁 Explorar")
-                    }
-                }
-
-                // Preview del icono si hay una ruta seleccionada
-                if (selectedPath.isNotEmpty()) {
-                    val file = remember(selectedPath) { java.io.File(selectedPath) }
-
-                    if (file.exists() && file.name.endsWith(".exe", ignoreCase = true)) {
-                        val iconBytes = remember(selectedPath) {
-                            IconExtractor.extractIconAsBytes(selectedPath, size = 64)
-                        }
-
-                        val appName = remember(selectedPath) {
-                            file.nameWithoutExtension
-                                .replace("-", " ")
-                                .replace("_", " ")
-                                .split(" ")
-                                .joinToString(" ") { it.replaceFirstChar { c ->
-                                    if (c.isLowerCase()) c.titlecase() else c.toString()
-                                }}
-                        }
-
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = AppColors.SurfaceVariant.copy(alpha = 0.3f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Icono preview
-                                Box(
-                                    modifier = Modifier.size(64.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (iconBytes != null) {
-                                        AppIcon(iconBytes = iconBytes, size = 64)
-                                    } else {
-                                        Text("🎮", style = MaterialTheme.typography.displayMedium)
-                                    }
-                                }
-
-                                Column {
-                                    Text(
-                                        "Vista previa:",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = AppColors.OnSurface.copy(alpha = 0.6f)
-                                    )
-                                    Text(
-                                        appName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = AppColors.OnSurface
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        errorMessage = "El archivo no existe o no es un ejecutable válido"
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar")
-                    }
-
-                    Button(
-                        onClick = {
-                            val file = java.io.File(selectedPath)
-                            if (file.exists() && file.name.endsWith(".exe", ignoreCase = true)) {
-                                // Extraer nombre automáticamente
-                                val appName = file.nameWithoutExtension
-                                    .replace("-", " ")
-                                    .replace("_", " ")
-                                    .split(" ")
-                                    .joinToString(" ") { it.replaceFirstChar { c ->
-                                        if (c.isLowerCase()) c.titlecase() else c.toString()
-                                    }}
-
-                                // Extraer icono automáticamente
-                                val iconBytes = IconExtractor.extractIconAsBytes(selectedPath, size = 64)
-
-                                onConfirm(
-                                    AppInfo(
-                                        name = appName,
-                                        path = selectedPath,
-                                        icon = "🎮", // Fallback
-                                        isCustom = true,
-                                        description = "Añadida manualmente",
-                                        iconBytes = iconBytes
-                                    )
-                                )
-                            } else {
-                                errorMessage = "Selecciona un archivo .exe válido"
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = selectedPath.isNotEmpty(),
-                        colors = ButtonDefaults.buttonColors(AppColors.Primary)
-                    ) {
-                        Text("Agregar", color = AppColors.OnPrimary)
-                    }
                 }
             }
         }
@@ -548,7 +450,7 @@ fun LoadingView() {
             CircularProgressIndicator(color = AppColors.Primary)
             Spacer(Modifier.height(16.dp))
             Text(
-                "Escaneando aplicaciones y extrayendo iconos...",
+                "Escaneando aplicaciones y extrayendo iconos de alta calidad...",
                 color = AppColors.OnSurface,
                 style = MaterialTheme.typography.titleMedium
             )

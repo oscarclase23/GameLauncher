@@ -5,8 +5,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.oscarrial.gamelauncher.data.AppInfo
 import com.oscarrial.gamelauncher.system.AppScanner
-import com.oscarrial.gamelauncher.system.OperatingSystem
-import com.oscarrial.gamelauncher.system.PlatformService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,10 +16,9 @@ import java.io.IOException
  */
 class LauncherViewModel {
 
-    // 🔧 FIX: Usar Main como dispatcher principal
     private val viewModelScope = CoroutineScope(Dispatchers.Main)
 
-    // ESTADOS
+    // Estados
     var apps by mutableStateOf(emptyList<AppInfo>())
         private set
 
@@ -35,22 +32,22 @@ class LauncherViewModel {
         loadApps()
     }
 
-    // Lógica para filtrar las apps (getter)
+    // Aplicaciones filtradas por búsqueda
     val filteredApps: List<AppInfo>
         get() = apps.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
     /**
-     * 🔧 FIX: Carga las aplicaciones ASÍNCRONAMENTE correctamente
+     * Carga las aplicaciones asíncronamente
      */
     private fun loadApps() {
         viewModelScope.launch {
             try {
                 // Ejecutar el escaneo en el hilo de I/O
                 val scannedApps = withContext(Dispatchers.IO) {
-                    AppScanner.scanSystemApps(OperatingSystem.Windows)
+                    AppScanner.scanWindowsApps()
                 }
 
-                // ✅ Actualización en el hilo Main (automático porque viewModelScope usa Main)
+                // Actualización en el hilo Main
                 apps = scannedApps
                 println("✅ Apps cargadas correctamente. Total: ${apps.size}")
 
@@ -60,7 +57,6 @@ class LauncherViewModel {
                 apps = emptyList()
 
             } finally {
-                // Siempre desactivar el loading
                 isLoading = false
             }
         }
@@ -73,13 +69,8 @@ class LauncherViewModel {
     }
 
     fun launchApp(app: AppInfo) {
-        val os = PlatformService.getCurrentOS()
-
-        val command: List<String> = if (os == OperatingSystem.Windows) {
-            listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
-        } else {
-            listOf("/bin/bash", "-c", app.path)
-        }
+        // Comando para Windows
+        val command = listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
 
         println("🚀 Lanzando: ${app.name}")
         println("📝 Comando: ${command.joinToString(" ")}")

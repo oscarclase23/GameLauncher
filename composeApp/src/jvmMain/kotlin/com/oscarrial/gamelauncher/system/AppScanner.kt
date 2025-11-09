@@ -4,13 +4,12 @@ import com.oscarrial.gamelauncher.data.AppInfo
 import java.io.File
 
 /**
- * Servicio encargado de escanear el sistema en busca de aplicaciones.
+ * Servicio encargado de escanear aplicaciones de Windows
  */
 object AppScanner {
 
     private val USER_HOME = System.getProperty("user.home")
 
-    // --- RUTAS PRINCIPALES DE WINDOWS ---
     private val WINDOWS_PROGRAM_FILES = listOf(
         "C:\\Program Files",
         "C:\\Program Files (x86)",
@@ -22,7 +21,6 @@ object AppScanner {
         "$USER_HOME\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"
     )
 
-    // Rutas de aplicaciones del sistema (solo para apps específicas)
     private val WINDOWS_SYSTEM_PATHS = listOf(
         "C:\\Windows\\System32",
         "C:\\Windows"
@@ -30,7 +28,6 @@ object AppScanner {
 
     private val ALL_WINDOWS_PATHS = WINDOWS_PROGRAM_FILES + WINDOWS_APP_DATA_PATHS
 
-    // --- APLICACIONES CONOCIDAS Y SUS EJECUTABLES ---
     private val KNOWN_APPS = mapOf(
         // IDEs y Desarrollo
         "intellij" to listOf("idea64.exe", "idea.exe"),
@@ -98,18 +95,16 @@ object AppScanner {
         "matlab" to listOf("matlab.exe")
     )
 
-    // Aplicaciones del sistema Windows que queremos incluir
     private val SYSTEM_APPS = mapOf(
-        "calculadora" to "calc.exe",
-        "paint" to "mspaint.exe",
-        "notepad" to "notepad.exe",
-        "wordpad" to "wordpad.exe",
-        "explorador" to "explorer.exe",
-        "cmd" to "cmd.exe",
-        "powershell" to "powershell.exe"
+        "Calculadora" to "calc.exe",
+        "Paint" to "mspaint.exe",
+        "Notepad" to "notepad.exe",
+        "WordPad" to "wordpad.exe",
+        "Explorador" to "explorer.exe",
+        "CMD" to "cmd.exe",
+        "PowerShell" to "powershell.exe"
     )
 
-    // --- FILTROS MEJORADOS ---
     private val IGNORED_NAMES = setOf(
         "unins000.exe", "uninstall.exe", "uninst.exe", "setup.exe", "install.exe",
         "updater.exe", "update.exe", "launcher.exe", "helper.exe", "crashhandler.exe",
@@ -121,29 +116,16 @@ object AppScanner {
         "autorun.exe", "runtime.exe", "redist.exe", "prerequisite.exe"
     ).map { it.lowercase() }.toSet()
 
-    // Palabras clave que indican que NO es una aplicación principal
     private val IGNORED_KEYWORDS = setOf(
         "uninstall", "setup", "install", "update", "updater", "crash", "redist",
         "helper", "maintenance", "prerequisite", "launcher", "bootstrapper"
     )
 
-    // Carpetas que definitivamente debemos ignorar
     private val IGNORED_FOLDERS = setOf(
         "common", "commonfiles", "shared", "lib", "libs", "library", "bin32",
         "data", "temp", "cache", "logs", "resources", "assets", "locales",
         "uninstall", "old", "backup", "system", "windows nt", "windowsapps"
     ).map { it.lowercase().replace(" ", "") }.toSet()
-
-    /**
-     * Función principal que decide qué sistema escanear.
-     */
-    fun scanSystemApps(os: OperatingSystem): List<AppInfo> {
-        return when (os) {
-            OperatingSystem.Windows -> scanWindowsApps()
-            OperatingSystem.Linux -> emptyList()
-            else -> emptyList()
-        }
-    }
 
     /**
      * Escanea las rutas de Windows en busca de aplicaciones.
@@ -153,11 +135,11 @@ object AppScanner {
 
         println("🔍 Iniciando escaneo de aplicaciones de Windows...")
 
-        // 1. Buscar aplicaciones del sistema (calculadora, paint, etc.)
+        // 1. Aplicaciones del sistema
         println("📂 Escaneando aplicaciones del sistema...")
         foundApps.addAll(scanSystemApps())
 
-        // 2. Buscar aplicaciones conocidas primero (más rápido y preciso)
+        // 2. Aplicaciones conocidas
         println("🎯 Escaneando aplicaciones conocidas...")
         foundApps.addAll(scanKnownApps())
 
@@ -185,9 +167,6 @@ object AppScanner {
             .sortedBy { it.name }
     }
 
-    /**
-     * Busca aplicaciones del sistema de Windows.
-     */
     private fun scanSystemApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
@@ -204,9 +183,6 @@ object AppScanner {
         return apps
     }
 
-    /**
-     * Busca aplicaciones conocidas en todo el sistema.
-     */
     private fun scanKnownApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
@@ -220,15 +196,11 @@ object AppScanner {
         return apps
     }
 
-    /**
-     * Busca un ejecutable conocido en todas las rutas.
-     */
     private fun findKnownApp(appKey: String, exeNames: List<String>): AppInfo? {
         for (basePath in ALL_WINDOWS_PATHS) {
             val baseDir = File(basePath)
             if (!baseDir.exists()) continue
 
-            // Buscar en carpetas que coincidan con el nombre de la app
             baseDir.listFiles()?.forEach { folder ->
                 if (!folder.isDirectory) return@forEach
 
@@ -244,10 +216,12 @@ object AppScanner {
         return null
     }
 
-    /**
-     * Busca un ejecutable específico en una carpeta de forma recursiva.
-     */
-    private fun searchInFolderRecursive(folder: File, exeNames: List<String>, maxDepth: Int, currentDepth: Int = 0): File? {
+    private fun searchInFolderRecursive(
+        folder: File,
+        exeNames: List<String>,
+        maxDepth: Int,
+        currentDepth: Int = 0
+    ): File? {
         if (currentDepth > maxDepth) return null
 
         folder.listFiles()?.forEach { file ->
@@ -262,43 +236,34 @@ object AppScanner {
         return null
     }
 
-    /**
-     * Determina si una carpeta debe ser ignorada.
-     */
     private fun isIgnoredFolder(folder: File): Boolean {
         val folderName = folder.name.lowercase().replace(" ", "").replace("-", "")
 
-        // Ignorar carpetas muy cortas o genéricas
         if (folderName.length <= 2) return true
-
-        // Ignorar carpetas en la lista negra
         if (IGNORED_FOLDERS.any { folderName.contains(it) }) return true
-
-        // Ignorar carpetas que parecen vendedores o utilidades
         if (folderName.startsWith("microsoft") || folderName.startsWith("windows")) return true
         if (folderName.contains("uninstall") || folderName.contains("setup")) return true
 
         return false
     }
 
-    /**
-     * Escanea una carpeta de aplicación en busca del ejecutable principal.
-     */
-    private fun scanAppFolder(appFolder: File, foundApps: MutableList<AppInfo>, isProgramFiles: Boolean) {
+    private fun scanAppFolder(
+        appFolder: File,
+        foundApps: MutableList<AppInfo>,
+        isProgramFiles: Boolean
+    ) {
         val appFolderName = appFolder.name.lowercase().replace(" ", "").replace("-", "")
 
-        // Buscar en subcarpetas clave
         val searchDirs = mutableListOf(appFolder)
         appFolder.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
             val dirName = dir.name.lowercase()
             when {
                 dirName in setOf("bin", "app", "application") -> searchDirs.add(dir)
                 dirName.startsWith("app-") && !isProgramFiles -> searchDirs.add(dir)
-                dirName.matches(Regex("\\d+\\.\\d+.*")) -> searchDirs.add(dir) // Carpetas de versión
+                dirName.matches(Regex("\\d+\\.\\d+.*")) -> searchDirs.add(dir)
             }
         }
 
-        // Buscar el mejor ejecutable
         val candidates = searchDirs.flatMap { dir ->
             dir.listFiles()?.filter {
                 it.isFile &&
@@ -310,14 +275,12 @@ object AppScanner {
         val mainExe = candidates.minByOrNull { file ->
             val exeName = file.nameWithoutExtension.lowercase().replace(" ", "").replace("-", "")
 
-            // Priorizar coincidencia exacta con carpeta
             val matchScore = when {
                 exeName == appFolderName -> 0
                 exeName.contains(appFolderName) || appFolderName.contains(exeName) -> 1
                 else -> 10
             }
 
-            // Preferir nombres más cortos (suelen ser el ejecutable principal)
             val lengthScore = file.name.length / 10
 
             matchScore + lengthScore
@@ -328,20 +291,14 @@ object AppScanner {
         }
     }
 
-    /**
-     * Determina si un ejecutable debe ser ignorado.
-     */
     private fun isIgnoredExecutable(file: File): Boolean {
         val fileName = file.name.lowercase()
 
-        // Verificar lista negra directa
         if (IGNORED_NAMES.contains(fileName)) return true
 
-        // Verificar palabras clave problemáticas
         val nameWithoutExt = file.nameWithoutExtension.lowercase()
         if (IGNORED_KEYWORDS.any { nameWithoutExt.contains(it) }) return true
 
-        // Ignorar ejecutables muy largos (probablemente no sean principales)
         if (file.name.length > 50) return true
 
         return false
@@ -349,7 +306,7 @@ object AppScanner {
 
     /**
      * Crea un AppInfo desde un archivo ejecutable.
-     * NUEVA VERSIÓN: Extrae el icono real del .exe
+     * Extrae el icono real del .exe en tamaño 128x128
      */
     private fun createAppInfoFromFile(file: File, folderName: String? = null): AppInfo {
         val name = (folderName ?: file.nameWithoutExtension)
@@ -358,10 +315,10 @@ object AppScanner {
             .split(" ")
             .joinToString(" ") { it.capitalize() }
 
-        // 🎨 EXTRACCIÓN DEL ICONO REAL (64x64 para mejor calidad)
+        // Extracción del icono en 128x128 (alta calidad)
         println("  🎨 Extrayendo icono de: ${file.name}")
         val iconBytes = try {
-            IconExtractor.extractIconAsBytes(file.absolutePath, size = 64)
+            IconExtractor.extractIconAsBytes(file.absolutePath, size = 128)
         } catch (e: Exception) {
             println("  ⚠️ Error extrayendo icono de ${file.name}: ${e.message}")
             null
@@ -376,65 +333,46 @@ object AppScanner {
         return AppInfo(
             name = name,
             path = file.absolutePath,
-            icon = getIconForApp(name), // Emoji como fallback
+            icon = getIconForApp(name),
             description = "Aplicación de Windows",
-            iconBytes = iconBytes // ✨ NUEVO: Bytes del icono real
+            iconBytes = iconBytes
         )
     }
 
-    /**
-     * Obtiene el icono apropiado para una aplicación (FALLBACK de emojis).
-     */
     private fun getIconForApp(name: String): String {
         val normalized = name.lowercase().replace(" ", "")
 
         return when {
-            // IDEs
             normalized.contains("intellij") || normalized.contains("idea") -> "💻"
             normalized.contains("visualstudio") || normalized.contains("studio") -> "💻"
             normalized.contains("vscode") || normalized.contains("code") -> "💻"
             normalized.contains("pycharm") -> "🐍"
             normalized.contains("android") -> "🤖"
-
-            // Navegadores
             normalized.contains("chrome") -> "🌐"
             normalized.contains("firefox") -> "🦊"
             normalized.contains("edge") -> "🌐"
             normalized.contains("brave") -> "🦁"
-
-            // Comunicación
             normalized.contains("discord") -> "💬"
             normalized.contains("slack") -> "💼"
             normalized.contains("teams") -> "👥"
             normalized.contains("telegram") -> "✈️"
             normalized.contains("whatsapp") -> "📱"
-
-            // Multimedia
             normalized.contains("spotify") -> "🎵"
             normalized.contains("vlc") -> "🎬"
             normalized.contains("obs") -> "🎥"
-
-            // Gaming
             normalized.contains("steam") -> "🎮"
             normalized.contains("epic") -> "🎮"
             normalized.contains("origin") -> "🎮"
             normalized.contains("gog") -> "🎮"
-
-            // Herramientas
             normalized.contains("notepad") -> "📝"
             normalized.contains("7zip") || normalized.contains("winrar") -> "📦"
             normalized.contains("gimp") || normalized.contains("photoshop") -> "🎨"
             normalized.contains("virtualbox") || normalized.contains("vmware") -> "🖥️"
-
-            // Sistema
             normalized.contains("calc") -> "🔢"
             normalized.contains("paint") -> "🎨"
             normalized.contains("cmd") || normalized.contains("powershell") -> "⌨️"
-
-            // Educativas
             normalized.contains("pseint") -> "📊"
             normalized.contains("dia") -> "📐"
-
             else -> "✨"
         }
     }
