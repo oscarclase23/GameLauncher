@@ -88,12 +88,20 @@ class LauncherViewModel {
                 listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
             }
             OperatingSystem.Linux -> {
-                // Linux: ejecutar directamente o usar xdg-open si es necesario
-                // Para archivos .desktop, usar la ruta del ejecutable
-                if (app.path.endsWith(".desktop")) {
+                val path = app.path
+
+                // Usamos bash -c si la ruta NO es absoluta (es decir, es un comando en el PATH, como 'vim').
+                // Si la ruta absoluta fue resuelta por parseDesktopFileForManualAdd, se ejecuta directamente.
+                if (path.startsWith("/")) {
+                    // Ruta absoluta (e.g., /usr/bin/vim). Ejecutar directamente.
+                    listOf(path)
+                } else if (path.endsWith(".desktop")) {
+                    // Si la ruta original del .desktop se pasó como fallback (en caso de que el 'Exec=' no fuera resoluble),
+                    // usamos gtk-launch o fallamos, aunque la lógica del parseo manual debería evitar esto.
                     listOf("gtk-launch", File(app.path).nameWithoutExtension)
                 } else {
-                    listOf(app.path)
+                    // Comando simple (e.g., vim). Ejecutar a través de bash -c.
+                    listOf("/bin/bash", "-c", path)
                 }
             }
             else -> {

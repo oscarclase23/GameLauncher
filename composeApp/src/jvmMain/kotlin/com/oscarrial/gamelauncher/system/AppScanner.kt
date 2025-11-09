@@ -437,9 +437,9 @@ object AppScanner {
     }
 
     /**
-    * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH.
-    * Retorna NULL si no puede resolver una ruta ejecutable existente.
-    */
+     * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH.
+     * Retorna NULL si no puede resolver una ruta ejecutable existente.
+     */
     private fun resolveExecutablePath(command: String): String? {
         // Lista de ubicaciones a verificar, incluyendo el comando directo si es una ruta absoluta
         val searchFiles = mutableListOf<File>()

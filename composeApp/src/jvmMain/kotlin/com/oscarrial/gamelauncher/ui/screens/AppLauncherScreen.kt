@@ -278,6 +278,7 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
 
 /**
  * Parsea un archivo .desktop seleccionado manualmente para obtener el nombre, la ruta de ejecución y el icono.
+ * Incluye la lógica de resolución de ruta con fallback.
  * Devuelve Triple<Name, ExecutablePath, IconName>.
  */
 private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, String, String?>? {
@@ -286,9 +287,11 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
         var exec: String? = null
         var iconName: String? = null
 
+        // Se recorre el archivo y se extrae el valor del último Name, Exec e Icon
         desktopFile.readLines().forEach { line ->
             val trimmedLine = line.trim()
             when {
+                // Se asegura de que Name sólo se tome del grupo [Desktop Entry] (el primero)
                 trimmedLine.startsWith("Name=") && name == null -> name = trimmedLine.substringAfter("Name=")
                 trimmedLine.startsWith("Exec=") -> exec = trimmedLine.substringAfter("Exec=")
                 trimmedLine.startsWith("Icon=") -> iconName = trimmedLine.substringAfter("Icon=")
@@ -296,21 +299,71 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
         }
 
         if (name.isNullOrBlank() || exec.isNullOrBlank()) {
+            println("❌ Error de parseo: Name o Exec no encontrados en el .desktop.")
             return null
         }
 
         val cleanExec = exec!!
-            .replace(Regex("%[a-zA-Z]"), "")
+            .replace(Regex("%[a-zA-Z]"), "") // Limpiar códigos como %f, %u, etc.
             .trim()
             .split(" ")
             .firstOrNull() ?: return null
 
-        return Triple(name!!, cleanExec, iconName)
+        // --- CORRECCIÓN: Lógica de resolución de la ruta con fallback ---
+        val executablePath = resolveExecutablePathFromCommand(cleanExec)
+
+        // Si la resolución falla (executablePath es nulo), usamos el comando limpio original (cleanExec)
+        // como fallback, permitiendo que la AppInfo se cree y el ViewModel intente lanzarlo.
+        val finalPath = if (executablePath.isNullOrBlank()) {
+            println("⚠️ Advertencia: No se pudo resolver la ruta absoluta ejecutable para: '$cleanExec'. Usando el comando original como fallback.")
+            cleanExec
+        } else {
+            executablePath
+        }
+        // --- FIN de la corrección ---
+
+        return Triple(name!!, finalPath, iconName)
 
     } catch (e: Exception) {
-        println("Error parseando .desktop: ${e.message}")
+        println("❌ Error grave parseando .desktop: ${e.message}")
         return null
     }
+}
+
+/**
+ * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH.
+ * Retorna NULL si no puede resolver una ruta ejecutable existente.
+ * (Copia de la lógica de AppScanner.kt para uso local)
+ */
+private fun resolveExecutablePathFromCommand(command: String): String? {
+    // Lista de ubicaciones a verificar, incluyendo el comando directo si es una ruta absoluta
+    val searchFiles = mutableListOf<File>()
+
+    if (command.startsWith("/")) {
+        // Si es una ruta absoluta, se añade como primer candidato
+        searchFiles.add(File(command))
+    }
+
+    // Buscar en el PATH si es solo un comando (ej: "vim")
+    val pathEnv = System.getenv("PATH") ?: ""
+    for (path in pathEnv.split(":")) {
+        searchFiles.add(File(path, command))
+    }
+
+    for (file in searchFiles) {
+        if (file.exists() && file.canExecute()) {
+            return try {
+                // Intentar obtener la ruta canónica para resolver symlinks
+                file.canonicalPath
+            } catch (e: Exception) {
+                // Si falla (IOException al resolver), volvemos a la ruta absoluta
+                file.absolutePath
+            }
+        }
+    }
+
+    // Si no se pudo encontrar o resolver una ruta ejecutable existente, descartamos.
+    return null
 }
 
 // ============================================================================
