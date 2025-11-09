@@ -29,6 +29,10 @@ import javax.swing.UIManager
 import javax.swing.filechooser.FileNameExtensionFilter
 import java.io.File
 
+// Tamaño del icono en Compose (basado en el tamaño de extracción de 64px)
+private val ICON_DISPLAY_SIZE = 64.dp
+private val ICON_EXTRACTION_SIZE = 64
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppLauncherScreen() {
@@ -163,7 +167,6 @@ fun AppHeader(
 
 /**
  * Abre el explorador de archivos nativo del sistema.
- * Soporta Windows (.exe) y Linux (.desktop)
  */
 private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
     try {
@@ -174,31 +177,28 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
         val isLinux = osName.contains("nux") || osName.contains("nix")
 
         val fileChooser = JFileChooser().apply {
-            dialogTitle = "Seleccionar aplicación ejecutable"
+            dialogTitle = "Seleccionar aplicación ejecutable o .desktop"
             fileSelectionMode = JFileChooser.FILES_ONLY
 
             // Carpeta inicial según el SO
             currentDirectory = when {
                 isWindows -> File("C:\\Program Files")
-                isLinux -> File("/usr/share/applications")
+                isLinux -> File(System.getProperty("user.home"))
                 else -> File(System.getProperty("user.home"))
             }
 
             // Filtros según el SO
-            if (isWindows) {
-                fileFilter = FileNameExtensionFilter(
-                    "Archivos ejecutables (*.exe)",
-                    "exe"
-                )
-            } else if (isLinux) {
-                fileFilter = object : javax.swing.filechooser.FileFilter() {
+            fileFilter = when {
+                isWindows -> FileNameExtensionFilter("Archivos ejecutables (*.exe)", "exe")
+                isLinux -> object : javax.swing.filechooser.FileFilter() {
                     override fun accept(f: File): Boolean {
                         return f.isDirectory || f.name.endsWith(".desktop")
                     }
                     override fun getDescription(): String {
-                        return "Aplicaciones de Linux (*.desktop)"
+                        return "Aplicaciones (*.desktop)"
                     }
                 }
+                else -> fileFilter
             }
 
             isAcceptAllFileFilterUsed = false
@@ -210,7 +210,6 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
         if (result == JFileChooser.APPROVE_OPTION) {
             val selectedFile = fileChooser.selectedFile
 
-            // Validar según el SO
             val isValid = when {
                 isWindows -> selectedFile.exists() && selectedFile.name.endsWith(".exe", ignoreCase = true)
                 isLinux -> selectedFile.exists() && selectedFile.name.endsWith(".desktop")
@@ -222,53 +221,45 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
                 return@withContext null
             }
 
-            // Procesar según el tipo de archivo
+            // --- PROCESAMIENTO DE ARCHIVO ---
             when {
                 selectedFile.name.endsWith(".desktop") -> {
-                    // Parsear archivo .desktop de Linux
+                    // Lógica para Linux: Parsear .desktop
                     val desktopInfo = parseDesktopFileForManualAdd(selectedFile)
                     if (desktopInfo == null) {
                         println("❌ No se pudo parsear el archivo .desktop")
                         return@withContext null
                     }
-
-                    println("📂 Archivo seleccionado: ${selectedFile.name}")
-                    println("✅ Aplicación añadida: ${desktopInfo.first}")
+                    val iconBytes = if (!desktopInfo.third.isNullOrBlank()) {
+                        IconExtractor.extractLinuxIcon(desktopInfo.third!!)
+                    } else null
 
                     AppInfo(
                         name = desktopInfo.first,
                         path = desktopInfo.second,
                         icon = "🎮",
                         isCustom = true,
-                        description = "Añadida manualmente",
-                        iconBytes = desktopInfo.third
+                        description = "Añadida manualmente (Linux)",
+                        iconBytes = iconBytes
                     )
                 }
                 isWindows -> {
-                    // Procesar .exe de Windows
+                    // Lógica para Windows: Procesar .exe
                     val appName = selectedFile.nameWithoutExtension
                         .replace("-", " ")
                         .replace("_", " ")
                         .split(" ")
                         .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 
-                    println("📂 Archivo seleccionado: ${selectedFile.name}")
-                    println("🎯 Extrayendo icono de alta calidad...")
-
-                    val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = 128)
-
-                    if (iconBytes != null) {
-                        println("✅ Icono extraído correctamente (${iconBytes.size} bytes)")
-                    } else {
-                        println("⚠️ No se pudo extraer el icono, se usará fallback")
-                    }
+                    // Usar el tamaño constante 64px para la extracción
+                    val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = ICON_EXTRACTION_SIZE)
 
                     AppInfo(
                         name = appName,
                         path = selectedFile.absolutePath,
                         icon = "🎮",
                         isCustom = true,
-                        description = "Añadida manualmente",
+                        description = "Añadida manualmente (Windows)",
                         iconBytes = iconBytes
                     )
                 }
@@ -286,9 +277,10 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
 }
 
 /**
- * Parsea un archivo .desktop seleccionado manualmente.
+ * Parsea un archivo .desktop seleccionado manualmente para obtener el nombre, la ruta de ejecución y el icono.
+ * Devuelve Triple<Name, ExecutablePath, IconName>.
  */
-private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, String, ByteArray?>? {
+private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, String, String?>? {
     try {
         var name: String? = null
         var exec: String? = null
@@ -297,15 +289,9 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
         desktopFile.readLines().forEach { line ->
             val trimmedLine = line.trim()
             when {
-                trimmedLine.startsWith("Name=") && name == null -> {
-                    name = trimmedLine.substringAfter("Name=")
-                }
-                trimmedLine.startsWith("Exec=") -> {
-                    exec = trimmedLine.substringAfter("Exec=")
-                }
-                trimmedLine.startsWith("Icon=") -> {
-                    iconName = trimmedLine.substringAfter("Icon=")
-                }
+                trimmedLine.startsWith("Name=") && name == null -> name = trimmedLine.substringAfter("Name=")
+                trimmedLine.startsWith("Exec=") -> exec = trimmedLine.substringAfter("Exec=")
+                trimmedLine.startsWith("Icon=") -> iconName = trimmedLine.substringAfter("Icon=")
             }
         }
 
@@ -319,13 +305,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
             .split(" ")
             .firstOrNull() ?: return null
 
-        val iconBytes = if (!iconName.isNullOrBlank()) {
-            IconExtractor.extractLinuxIcon(iconName!!)
-        } else {
-            null
-        }
-
-        return Triple(name!!, cleanExec, iconBytes)
+        return Triple(name!!, cleanExec, iconName)
 
     } catch (e: Exception) {
         println("Error parseando .desktop: ${e.message}")
@@ -334,7 +314,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
 }
 
 // ============================================================================
-// COMPONENTES DE UI (SIN CAMBIOS)
+// COMPONENTES DE UI
 // ============================================================================
 
 @Composable
@@ -411,7 +391,7 @@ fun AppListItem(
                 contentAlignment = Alignment.Center
             ) {
                 if (app.iconBytes != null) {
-                    AppIcon(iconBytes = app.iconBytes, size = 80)
+                    AppIcon(iconBytes = app.iconBytes, size = ICON_EXTRACTION_SIZE) // Usa el tamaño de extracción
                 } else {
                     Text(
                         text = app.icon,
@@ -466,7 +446,7 @@ fun AppListItem(
 }
 
 @Composable
-fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
+fun AppIcon(iconBytes: ByteArray, size: Int = ICON_EXTRACTION_SIZE) {
     val imageBitmap = remember(iconBytes) {
         try {
             val skiaImage = SkiaImage.makeFromEncoded(iconBytes)
@@ -481,8 +461,10 @@ fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
         Image(
             painter = BitmapPainter(imageBitmap),
             contentDescription = "App Icon",
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)),
-            contentScale = androidx.compose.ui.layout.ContentScale.None
+            modifier = Modifier
+                .size(size.dp) // Asegura que se dibuje al tamaño correcto (64dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     } else {
         Box(

@@ -1,6 +1,5 @@
 package com.oscarrial.gamelauncher.system
 
-import sun.awt.shell.ShellFolder
 import java.awt.Image
 import java.awt.image.BufferedImage
 import java.io.File
@@ -9,11 +8,11 @@ import javax.swing.ImageIcon
 import javax.swing.filechooser.FileSystemView
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import kotlin.math.min
 
 /**
  * Extrae iconos de alta calidad de ejecutables de Windows (.exe)
  * y de aplicaciones de Linux.
- * Utiliza múltiples estrategias para obtener la mejor resolución posible
  */
 object IconExtractor {
 
@@ -30,45 +29,38 @@ object IconExtractor {
     // Tamaños de iconos comunes en Linux
     private val ICON_SIZES = listOf(256, 128, 96, 64, 48, 32)
 
-    // ==================== WINDOWS (TU CÓDIGO ORIGINAL) ====================
+    // ==================== WINDOWS ====================
 
     /**
      * Extrae el icono de mayor calidad posible de un ejecutable de Windows.
      *
-     * Estrategia multi-nivel:
-     * 1. Intenta extraer el icono de 256x256 usando ShellFolder (solo Windows)
-     * 2. Si falla, usa FileSystemView (16x16 o 32x32)
-     * 3. Escala con máxima calidad usando interpolación bicúbica
-     *
      * @param exePath Ruta completa al archivo .exe
-     * @param size Tamaño deseado del icono (recomendado: 128)
+     * @param size Tamaño deseado del icono (por defecto 64)
      * @return BufferedImage con el icono de alta calidad, o null si falla
      */
-    fun extractIcon(exePath: String, size: Int = 128): BufferedImage? {
+    fun extractIcon(exePath: String, size: Int = 64): BufferedImage? {
         return try {
             val file = File(exePath)
             if (!file.exists() || !file.name.endsWith(".exe", ignoreCase = true)) {
                 return null
             }
 
-            // Estrategia 1: Intentar extraer icono de alta resolución con ShellFolder
+            // Estrategia 1: Intentar extraer icono de alta resolución (ShellFolder/FileSystemView)
             val highResIcon = extractHighResolutionIcon(file)
 
-            if (highResIcon != null && highResIcon.width >= 48) {
-                // Tenemos un icono de buena calidad, escalarlo al tamaño deseado
-                return scaleImageWithQuality(highResIcon, size, size)
+            val iconImage = if (highResIcon != null && highResIcon.width >= 48) {
+                highResIcon // Usar icono de alta calidad si se encuentra
+            } else {
+                // Estrategia 2: Usar FileSystemView como fallback
+                val systemIcon = FileSystemView.getFileSystemView().getSystemIcon(file)
+                when (systemIcon) {
+                    is ImageIcon -> systemIcon.image
+                    else -> iconToImage(systemIcon)
+                }
             }
 
-            // Estrategia 2: Usar FileSystemView como fallback
-            val systemIcon = FileSystemView.getFileSystemView().getSystemIcon(file)
-            val iconImage = when (systemIcon) {
-                is ImageIcon -> systemIcon.image
-                else -> iconToImage(systemIcon)
-            }
-
-            // Escalar con máxima calidad
-            val targetSize = (size * 0.4).toInt().coerceAtLeast(20)
-            scaleImageWithQuality(iconImage, targetSize, targetSize)
+            // CORREGIDO: Escalar con máxima calidad al tamaño deseado (size)
+            scaleImageWithQuality(iconImage, size, size)
 
         } catch (e: Exception) {
             println("Error extrayendo icono de $exePath: ${e.message}")
@@ -92,10 +84,10 @@ object IconExtractor {
     /**
      * Extrae el icono como ByteArray para usar directamente en Compose.
      * @param exePath Ruta al ejecutable
-     * @param size Tamaño objetivo (recomendado: 128 para balance calidad/rendimiento)
+     * @param size Tamaño objetivo (por defecto 64)
      * @return ByteArray con la imagen PNG, o null si falla
      */
-    fun extractIconAsBytes(exePath: String, size: Int = 128): ByteArray? {
+    fun extractIconAsBytes(exePath: String, size: Int = 64): ByteArray? {
         val image = extractIcon(exePath, size) ?: return null
 
         return try {
@@ -108,13 +100,10 @@ object IconExtractor {
         }
     }
 
-    // ==================== LINUX (NUEVO) ====================
+    // ==================== LINUX ====================
 
     /**
      * Extrae el icono de una aplicación de Linux.
-     *
-     * @param iconName Nombre del icono (ej: "firefox", "gimp", "/usr/share/icons/firefox.png")
-     * @return ByteArray del icono en formato PNG, o null si no se encuentra
      */
     fun extractLinuxIcon(iconName: String): ByteArray? {
         // Si ya es una ruta absoluta, cargarla directamente
@@ -125,7 +114,7 @@ object IconExtractor {
         // Buscar en las rutas estándar de iconos
         val iconFile = findLinuxIconFile(iconName)
         if (iconFile != null) {
-            return loadIconFromPath(iconFile.absolutePath)
+            return loadIconFromPath(iconFile.absolutePath, size = 64) // Escala a 64x64
         }
 
         println("  ⚠️ No se encontró icono para: $iconName")
@@ -133,52 +122,49 @@ object IconExtractor {
     }
 
     /**
-     * Busca un archivo de icono en las rutas estándar de Linux.
+     * Busca un archivo de icono en las rutas estándar de Linux, priorizando
+     * el tamaño más grande disponible.
      */
     private fun findLinuxIconFile(iconName: String): File? {
         val extensions = listOf(".png", ".svg", ".xpm")
 
-        for (basePath in LINUX_ICON_PATHS) {
-            val baseDir = File(basePath)
-            if (!baseDir.exists() || !baseDir.isDirectory) continue
+        for (size in ICON_SIZES) {
+            for (basePath in LINUX_ICON_PATHS) {
+                val baseDir = File(basePath)
+                if (!baseDir.exists() || !baseDir.isDirectory) continue
 
-            // Priorizar iconos de mayor tamaño
-            for (size in ICON_SIZES) {
                 for (ext in extensions) {
                     // Buscar en hicolor/SIZE/apps/ICON
                     val hicolorPath = File(baseDir, "hicolor/${size}x${size}/apps/$iconName$ext")
                     if (hicolorPath.exists()) return hicolorPath
 
-                    // Buscar en THEME/SIZE/apps/ICON
+                    // Buscar en subcarpetas de tamaño (Ej: 'default/64x64/apps')
                     baseDir.listFiles()?.forEach { themeDir ->
                         if (themeDir.isDirectory) {
                             val themePath = File(themeDir, "${size}x${size}/apps/$iconName$ext")
                             if (themePath.exists()) return themePath
                         }
                     }
+
+                    // Buscar directamente en /usr/share/pixmaps/ (para iconos de sistema)
+                    val pixmapPath = File(baseDir, "$iconName$ext")
+                    if (pixmapPath.exists()) return pixmapPath
                 }
             }
-
-            // Buscar directamente en /usr/share/pixmaps/
-            for (ext in extensions) {
-                val pixmapPath = File(basePath, "$iconName$ext")
-                if (pixmapPath.exists()) return pixmapPath
-            }
         }
-
         return null
     }
 
     /**
      * Carga un icono desde una ruta y lo convierte a ByteArray PNG
      */
-    private fun loadIconFromPath(path: String): ByteArray? {
+    private fun loadIconFromPath(path: String, size: Int = 64): ByteArray? {
         return try {
             val file = File(path)
             if (!file.exists()) return null
 
             val image = ImageIO.read(file) ?: return null
-            val scaledImage = scaleImageWithQuality(image, 64, 64)
+            val scaledImage = scaleImageWithQuality(image, size, size) // Escala al tamaño objetivo (64)
 
             val outputStream = java.io.ByteArrayOutputStream()
             ImageIO.write(scaledImage, "png", outputStream)
@@ -190,97 +176,48 @@ object IconExtractor {
         }
     }
 
-    // ==================== SHARED UTILITIES (TU CÓDIGO ORIGINAL) ====================
+    // ==================== SHARED UTILITIES ====================
 
-    /**
-     * Convierte un Icon de Swing a Image
-     */
     private fun iconToImage(icon: javax.swing.Icon): Image {
-        val bufferedImage = BufferedImage(
-            icon.iconWidth,
-            icon.iconHeight,
-            BufferedImage.TYPE_INT_ARGB
-        )
+        val bufferedImage = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)
         val g = bufferedImage.createGraphics()
-
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-
         icon.paintIcon(null, g, 0, 0)
         g.dispose()
-
         return bufferedImage
     }
 
-    /**
-     * Convierte un Image a BufferedImage
-     */
     private fun imageToBufferedImage(image: Image): BufferedImage {
-        if (image is BufferedImage) {
-            return image
-        }
-
+        if (image is BufferedImage) return image
         val width = image.getWidth(null)
         val height = image.getHeight(null)
-
         val bufferedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
         val g = bufferedImage.createGraphics()
-
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
-
         g.drawImage(image, 0, 0, null)
         g.dispose()
-
         return bufferedImage
     }
 
-    /**
-     * Escala una imagen con la máxima calidad posible usando interpolación bicúbica
-     */
     private fun scaleImageWithQuality(source: Image, targetWidth: Int, targetHeight: Int): BufferedImage {
         val sourceWidth = source.getWidth(null)
         val sourceHeight = source.getHeight(null)
 
-        if (sourceWidth == targetWidth && sourceHeight == targetHeight) {
-            return imageToBufferedImage(source)
-        }
+        if (sourceWidth == targetWidth && sourceHeight == targetHeight) return imageToBufferedImage(source)
 
         val scaledImage = BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB)
         val g2d: Graphics2D = scaledImage.createGraphics()
 
-        g2d.setRenderingHint(
-            RenderingHints.KEY_INTERPOLATION,
-            RenderingHints.VALUE_INTERPOLATION_BICUBIC
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_RENDERING,
-            RenderingHints.VALUE_RENDER_QUALITY
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_ANTIALIASING,
-            RenderingHints.VALUE_ANTIALIAS_ON
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_ALPHA_INTERPOLATION,
-            RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_COLOR_RENDERING,
-            RenderingHints.VALUE_COLOR_RENDER_QUALITY
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_DITHERING,
-            RenderingHints.VALUE_DITHER_DISABLE
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_TEXT_ANTIALIASING,
-            RenderingHints.VALUE_TEXT_ANTIALIAS_ON
-        )
-        g2d.setRenderingHint(
-            RenderingHints.KEY_FRACTIONALMETRICS,
-            RenderingHints.VALUE_FRACTIONALMETRICS_ON
-        )
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g2d.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY)
+        g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY)
+        g2d.setRenderingHint(RenderingHints.KEY_DITHERING, RenderingHints.VALUE_DITHER_DISABLE)
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON)
 
         if (sourceWidth > targetWidth * 2 || sourceHeight > targetHeight * 2) {
             var currentImage = imageToBufferedImage(source)
