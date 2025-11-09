@@ -39,6 +39,10 @@ fun AppLauncherScreen() {
     val searchQuery = viewModel.searchQuery
     val isLoading = viewModel.isLoading
 
+    // Obtener los datos del ViewModel
+    val totalAppsCount = viewModel.totalAppsCount // Propiedad que se actualiza automáticamente
+    val osName = viewModel.currentOSInfo
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -47,33 +51,20 @@ fun AppLauncherScreen() {
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // Header con título y botón de añadir
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "🎮 Lanzador de Aplicaciones",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = AppColors.OnBackground
-                )
-                Button(
-                    onClick = {
-                        // Abrir explorador de archivos nativo de Windows
-                        scope.launch {
-                            val selectedApp = openNativeWindowsFileExplorer()
-                            if (selectedApp != null) {
-                                viewModel.addApp(selectedApp)
-                            }
+            // --- HEADER MODIFICADO ---
+            AppHeader(
+                totalAppsCount = totalAppsCount,
+                osName = osName,
+                onAddAppClicked = {
+                    scope.launch {
+                        val selectedApp = openNativeWindowsFileExplorer()
+                        if (selectedApp != null) {
+                            viewModel.addApp(selectedApp)
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(AppColors.Primary),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("➕ Añadir App", color = AppColors.OnPrimary)
+                    }
                 }
-            }
+            )
+            // -------------------------
 
             Spacer(Modifier.height(20.dp))
 
@@ -116,14 +107,70 @@ fun AppLauncherScreen() {
     }
 }
 
+// ============================================================================
+// NUEVO COMPONENTE: HEADER (Contador y SO)
+// ============================================================================
+
+@Composable
+fun AppHeader(
+    totalAppsCount: Int,
+    osName: String,
+    onAddAppClicked: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "🎮 Lanzador de Aplicaciones",
+                style = MaterialTheme.typography.headlineMedium,
+                color = AppColors.OnBackground
+            )
+
+            // Botón Añadir App
+            Button(
+                onClick = onAddAppClicked,
+                colors = ButtonDefaults.buttonColors(AppColors.Primary),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("➕ Añadir App", color = AppColors.OnPrimary)
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Fila para el contador y el SO
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Contador de aplicaciones
+            Text(
+                text = "Total de Apps Encontradas: $totalAppsCount",
+                style = MaterialTheme.typography.titleSmall,
+                color = AppColors.OnSurface.copy(alpha = 0.8f)
+            )
+
+            // Información del sistema operativo
+            Text(
+                text = "Sistema Operativo: $osName",
+                style = MaterialTheme.typography.titleSmall,
+                color = AppColors.OnSurface.copy(alpha = 0.8f)
+            )
+        }
+    }
+}
+
+
+// ============================================================================
+// FUNCIONES DE DIÁLOGO Y COMPONENTES DE UI (RESTO DEL ARCHIVO SIN CAMBIOS)
+// ============================================================================
+
 /**
  * Abre el explorador de archivos NATIVO de Windows y devuelve un AppInfo si se selecciona un .exe válido.
- *
- * Esta función garantiza que:
- * 1. Se use el Look and Feel nativo de Windows
- * 2. El diálogo sea idéntico al explorador de archivos del sistema
- * 3. Solo muestre archivos .exe por defecto
- * 4. Inicie en la carpeta de "Archivos de programa" para facilitar la búsqueda
  */
 private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
     try {
@@ -139,13 +186,11 @@ private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Disp
             currentDirectory = File("C:\\Program Files")
 
             // Filtro para mostrar SOLO archivos .exe
-            // Esto hace que el explorador se vea más limpio y enfocado
             fileFilter = FileNameExtensionFilter(
                 "Archivos ejecutables (*.exe)",
                 "exe"
             )
 
-            // Configuración adicional para apariencia nativa
             isAcceptAllFileFilterUsed = false // No mostrar "Todos los archivos"
             isMultiSelectionEnabled = false    // Solo un archivo a la vez
         }
@@ -204,12 +249,11 @@ private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Disp
     }
 }
 
-// ============================================================================
-// COMPONENTES DE UI
-// ============================================================================
+// El resto de componentes (AppListHeader, AppListItem, AppIcon, SearchBar, EmptyView, LoadingView) permanecen sin cambios.
 
 @Composable
 fun AppListHeader() {
+    // ... (Tu código sin cambios)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -349,7 +393,6 @@ fun AppListItem(
 
 /**
  * Componente que renderiza un icono de aplicación de alta calidad.
- * Maneja correctamente la carga y el escalado de los iconos extraídos.
  */
 @Composable
 fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
@@ -365,12 +408,12 @@ fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
 
     if (imageBitmap != null) {
         Image(
-        painter = BitmapPainter(imageBitmap),
-        contentDescription = "App Icon",
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp)), // quitamos .size()
-        contentScale = androidx.compose.ui.layout.ContentScale.None // sin reescalar
-    )
+            painter = BitmapPainter(imageBitmap),
+            contentDescription = "App Icon",
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp)), // quitamos .size()
+            contentScale = androidx.compose.ui.layout.ContentScale.None // sin reescalar
+        )
     } else {
         // Fallback: icono genérico
         Box(

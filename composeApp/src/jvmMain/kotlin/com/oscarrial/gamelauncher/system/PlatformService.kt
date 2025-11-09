@@ -11,7 +11,7 @@ enum class OperatingSystem {
 }
 
 /**
- * Clase de utilidad para identificar el SO y el prefijo de lanzamiento.
+ * Clase de utilidad para identificar el SO.
  */
 object PlatformService {
 
@@ -26,9 +26,31 @@ object PlatformService {
     }
 
     /**
+     * Devuelve el nombre amigable del sistema operativo con versión.
+     * Esto será visible en la interfaz de usuario.
+     */
+    fun getOsNameWithVersion(): String {
+        val osNameProperty = System.getProperty("os.name", "Unknown OS")
+        val osVersion = System.getProperty("os.version", "")
+
+        return when (getCurrentOS()) {
+            OperatingSystem.Windows -> {
+                // Intentar obtener un nombre más amigable para Windows 10/11
+                val friendlyName = when {
+                    osNameProperty.contains("11") -> "Windows 11"
+                    osNameProperty.contains("10") -> "Windows 10"
+                    else -> osNameProperty
+                }
+                "$friendlyName (v${osVersion})"
+            }
+            OperatingSystem.MacOS -> "macOS (v${osVersion})"
+            OperatingSystem.Linux -> "Linux (${osNameProperty})"
+            OperatingSystem.Other -> osNameProperty
+        }
+    }
+
+    /**
      * Devuelve el prefijo base del comando de shell.
-     * Nota: Este prefijo ya no es necesario para ProcessBuilder en el ViewModel,
-     * pero se mantiene aquí para la detección del SO.
      */
     fun getLaunchPrefix(): String {
         return when (getCurrentOS()) {

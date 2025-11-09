@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.oscarrial.gamelauncher.data.AppInfo
 import com.oscarrial.gamelauncher.system.AppScanner
+import com.oscarrial.gamelauncher.system.PlatformService // <--- NUEVO IMPORT
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,6 +28,19 @@ class LauncherViewModel {
 
     var isLoading by mutableStateOf(true)
         private set
+
+    // --- NUEVAS PROPIEDADES DE SÓLO LECTURA ---
+    /**
+     * Contador de aplicaciones en la lista, se actualiza automáticamente.
+     */
+    val totalAppsCount: Int
+        get() = apps.size
+
+    /**
+     * Información del sistema operativo (se carga una sola vez).
+     */
+    val currentOSInfo: String = PlatformService.getOsNameWithVersion()
+    // ----------------------------------------
 
     init {
         loadApps()
@@ -87,12 +101,14 @@ class LauncherViewModel {
     }
 
     fun addApp(app: AppInfo) {
+        // El operador '+' crea una nueva lista, lo que dispara la actualización del estado (Compose)
         apps = apps + app
         println("✅ App añadida: ${app.name}")
     }
 
     fun removeApp(app: AppInfo) {
         if (app.isCustom) {
+            // El operador '-' crea una nueva lista sin el elemento, actualizando el estado
             apps = apps - app
             println("🗑️ App eliminada: ${app.name}")
         }
