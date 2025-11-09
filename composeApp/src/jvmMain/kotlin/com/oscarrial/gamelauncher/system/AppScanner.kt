@@ -4,11 +4,14 @@ import com.oscarrial.gamelauncher.data.AppInfo
 import java.io.File
 
 /**
- * Servicio encargado de escanear aplicaciones de Windows
+ * Servicio encargado de escanear aplicaciones del sistema.
+ * Soporta Windows y Linux.
  */
 object AppScanner {
 
     private val USER_HOME = System.getProperty("user.home")
+
+    // ==================== WINDOWS ====================
 
     private val WINDOWS_PROGRAM_FILES = listOf(
         "C:\\Program Files",
@@ -127,17 +130,48 @@ object AppScanner {
         "uninstall", "old", "backup", "system", "windows nt", "windowsapps"
     ).map { it.lowercase().replace(" ", "") }.toSet()
 
+    // ==================== LINUX ====================
+
+    private val LINUX_APPLICATION_PATHS = listOf(
+        "/usr/share/applications",
+        "/usr/local/share/applications",
+        "$USER_HOME/.local/share/applications",
+        "/var/lib/flatpak/exports/share/applications",
+        "$USER_HOME/.local/share/flatpak/exports/share/applications"
+    )
+
+    // ==================== FUNCIÓN PÚBLICA PRINCIPAL ====================
+
     /**
-     * Escanea las rutas de Windows en busca de aplicaciones.
+     * Función principal que escanea aplicaciones según el sistema operativo detectado.
+     * Esta es la función pública que debe ser llamada desde fuera del objeto.
      */
-    fun scanWindowsApps(): List<AppInfo> {
+    fun scanSystemApps(): List<AppInfo> {
+        val osName = System.getProperty("os.name", "").lowercase()
+
+        return when {
+            osName.contains("win") -> scanWindowsApps()
+            osName.contains("nux") || osName.contains("nix") -> scanLinuxApps()
+            else -> {
+                println("⚠️ Sistema operativo no soportado: $osName")
+                emptyList()
+            }
+        }
+    }
+
+    // ==================== WINDOWS SCANNING ====================
+
+    /**
+     * Escanea todas las aplicaciones de Windows.
+     */
+    private fun scanWindowsApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
         println("🔍 Iniciando escaneo de aplicaciones de Windows...")
 
-        // 1. Aplicaciones del sistema
+        // 1. Aplicaciones del sistema (Calculadora, Paint, etc.)
         println("📂 Escaneando aplicaciones del sistema...")
-        foundApps.addAll(scanSystemApps())
+        foundApps.addAll(scanWindowsSystemApps())
 
         // 2. Aplicaciones conocidas
         println("🎯 Escaneando aplicaciones conocidas...")
@@ -167,7 +201,11 @@ object AppScanner {
             .sortedBy { it.name }
     }
 
-    private fun scanSystemApps(): List<AppInfo> {
+    /**
+     * Escanea las aplicaciones internas de Windows (Calculadora, Paint, etc.)
+     * RENOMBRADA para evitar conflicto de sobrecarga.
+     */
+    private fun scanWindowsSystemApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
         for ((name, exeName) in SYSTEM_APPS) {
@@ -305,8 +343,7 @@ object AppScanner {
     }
 
     /**
-     * Crea un AppInfo desde un archivo ejecutable.
-     * Extrae el icono real del .exe en tamaño 128x128
+     * Crea un AppInfo desde un archivo ejecutable de Windows.
      */
     private fun createAppInfoFromFile(file: File, folderName: String? = null): AppInfo {
         val name = (folderName ?: file.nameWithoutExtension)
@@ -315,7 +352,6 @@ object AppScanner {
             .split(" ")
             .joinToString(" ") { it.capitalize() }
 
-        // Extracción del icono en 128x128 (alta calidad)
         println("  🎨 Extrayendo icono de: ${file.name}")
         val iconBytes = try {
             IconExtractor.extractIconAsBytes(file.absolutePath, size = 128)
@@ -376,6 +412,124 @@ object AppScanner {
             else -> "✨"
         }
     }
+
+    // ==================== LINUX SCANNING ====================
+
+    /**
+     * Escanea aplicaciones de Linux analizando archivos .desktop
+     */
+    private fun scanLinuxApps(): List<AppInfo> {
+        val foundApps = mutableListOf<AppInfo>()
+
+        println("🔍 Iniciando escaneo de aplicaciones de Linux...")
+
+        for (appPath in LINUX_APPLICATION_PATHS) {
+            val appDir = File(appPath)
+            if (!appDir.exists() || !appDir.isDirectory) continue
+
+            println("📂 Escaneando: $appPath")
+
+            appDir.listFiles()?.filter { it.name.endsWith(".desktop") }?.forEach { desktopFile ->
+                try {
+                    val appInfo = parseDesktopFile(desktopFile)
+                    if (appInfo != null) {
+                        foundApps.add(appInfo)
+                    }
+                } catch (e: Exception) {
+                    println("  ⚠️ Error procesando ${desktopFile.name}: ${e.message}")
+                }
+            }
+        }
+
+        println("✅ Escaneo completado. Se encontraron ${foundApps.size} aplicaciones.")
+
+        return foundApps
+            .distinctBy { it.path.lowercase() }
+            .sortedBy { it.name }
+    }
+
+    /**
+     * Parsea un archivo .desktop de Linux
+     */
+    private fun parseDesktopFile(desktopFile: File): AppInfo? {
+        var name: String? = null
+        var exec: String? = null
+        var iconName: String? = null
+        var comment: String? = null
+
+        desktopFile.readLines().forEach { line ->
+            val trimmedLine = line.trim()
+
+            when {
+                trimmedLine.startsWith("Name=") && name == null -> {
+                    name = trimmedLine.substringAfter("Name=")
+                }
+                trimmedLine.startsWith("Exec=") -> {
+                    exec = trimmedLine.substringAfter("Exec=")
+                }
+                trimmedLine.startsWith("Icon=") -> {
+                    iconName = trimmedLine.substringAfter("Icon=")
+                }
+                trimmedLine.startsWith("Comment=") -> {
+                    comment = trimmedLine.substringAfter("Comment=")
+                }
+            }
+        }
+
+        if (name.isNullOrBlank() || exec.isNullOrBlank()) {
+            return null
+        }
+
+        val cleanExec = exec!!
+            .replace(Regex("%[a-zA-Z]"), "")
+            .trim()
+            .split(" ")
+            .firstOrNull() ?: return null
+
+        val executablePath = resolveExecutablePath(cleanExec)
+        if (executablePath == null || !File(executablePath).exists()) {
+            return null
+        }
+
+        val iconBytes = if (!iconName.isNullOrBlank()) {
+            IconExtractor.extractLinuxIcon(iconName!!)
+        } else {
+            null
+        }
+
+        println("  ✅ Aplicación encontrada: $name")
+
+        return AppInfo(
+            name = name!!,
+            path = executablePath,
+            icon = "🎮",
+            description = comment ?: "Aplicación de Linux",
+            iconBytes = iconBytes
+        )
+    }
+
+    /**
+     * Resuelve la ruta completa de un ejecutable de Linux
+     */
+    private fun resolveExecutablePath(command: String): String? {
+        if (command.startsWith("/")) {
+            return if (File(command).exists()) command else null
+        }
+
+        val pathEnv = System.getenv("PATH") ?: return null
+        val paths = pathEnv.split(":")
+
+        for (path in paths) {
+            val executable = File(path, command)
+            if (executable.exists() && executable.canExecute()) {
+                return executable.absolutePath
+            }
+        }
+
+        return null
+    }
+
+    // ==================== HELPERS ====================
 
     private fun String.capitalize(): String {
         return replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }

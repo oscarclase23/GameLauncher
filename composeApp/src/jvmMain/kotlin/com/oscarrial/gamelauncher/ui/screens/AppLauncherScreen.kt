@@ -38,9 +38,7 @@ fun AppLauncherScreen() {
     val filteredApps = viewModel.filteredApps
     val searchQuery = viewModel.searchQuery
     val isLoading = viewModel.isLoading
-
-    // Obtener los datos del ViewModel
-    val totalAppsCount = viewModel.totalAppsCount // Propiedad que se actualiza automáticamente
+    val totalAppsCount = viewModel.totalAppsCount
     val osName = viewModel.currentOSInfo
 
     Box(
@@ -51,20 +49,19 @@ fun AppLauncherScreen() {
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // --- HEADER MODIFICADO ---
+            // Header
             AppHeader(
                 totalAppsCount = totalAppsCount,
                 osName = osName,
                 onAddAppClicked = {
                     scope.launch {
-                        val selectedApp = openNativeWindowsFileExplorer()
+                        val selectedApp = openNativeFileExplorer()
                         if (selectedApp != null) {
                             viewModel.addApp(selectedApp)
                         }
                     }
                 }
             )
-            // -------------------------
 
             Spacer(Modifier.height(20.dp))
 
@@ -108,7 +105,7 @@ fun AppLauncherScreen() {
 }
 
 // ============================================================================
-// NUEVO COMPONENTE: HEADER (Contador y SO)
+// HEADER
 // ============================================================================
 
 @Composable
@@ -129,7 +126,6 @@ fun AppHeader(
                 color = AppColors.OnBackground
             )
 
-            // Botón Añadir App
             Button(
                 onClick = onAddAppClicked,
                 colors = ButtonDefaults.buttonColors(AppColors.Primary),
@@ -141,20 +137,17 @@ fun AppHeader(
 
         Spacer(Modifier.height(8.dp))
 
-        // Fila para el contador y el SO
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Contador de aplicaciones
             Text(
                 text = "Total de Apps Encontradas: $totalAppsCount",
                 style = MaterialTheme.typography.titleSmall,
                 color = AppColors.OnSurface.copy(alpha = 0.8f)
             )
 
-            // Información del sistema operativo
             Text(
                 text = "Sistema Operativo: $osName",
                 style = MaterialTheme.typography.titleSmall,
@@ -164,79 +157,122 @@ fun AppHeader(
     }
 }
 
-
 // ============================================================================
-// FUNCIONES DE DIÁLOGO Y COMPONENTES DE UI (RESTO DEL ARCHIVO SIN CAMBIOS)
+// EXPLORADOR DE ARCHIVOS MULTIPLATAFORMA
 // ============================================================================
 
 /**
- * Abre el explorador de archivos NATIVO de Windows y devuelve un AppInfo si se selecciona un .exe válido.
+ * Abre el explorador de archivos nativo del sistema.
+ * Soporta Windows (.exe) y Linux (.desktop)
  */
-private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
+private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
     try {
-        // CRÍTICO: Forzar el uso del Look and Feel nativo de Windows
-        // Esto hace que JFileChooser use el explorador de archivos nativo del sistema
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
+
+        val osName = System.getProperty("os.name", "").lowercase()
+        val isWindows = osName.contains("win")
+        val isLinux = osName.contains("nux") || osName.contains("nix")
 
         val fileChooser = JFileChooser().apply {
             dialogTitle = "Seleccionar aplicación ejecutable"
             fileSelectionMode = JFileChooser.FILES_ONLY
 
-            // Iniciar en la carpeta de Program Files (ubicación común de aplicaciones)
-            currentDirectory = File("C:\\Program Files")
+            // Carpeta inicial según el SO
+            currentDirectory = when {
+                isWindows -> File("C:\\Program Files")
+                isLinux -> File("/usr/share/applications")
+                else -> File(System.getProperty("user.home"))
+            }
 
-            // Filtro para mostrar SOLO archivos .exe
-            fileFilter = FileNameExtensionFilter(
-                "Archivos ejecutables (*.exe)",
-                "exe"
-            )
+            // Filtros según el SO
+            if (isWindows) {
+                fileFilter = FileNameExtensionFilter(
+                    "Archivos ejecutables (*.exe)",
+                    "exe"
+                )
+            } else if (isLinux) {
+                fileFilter = object : javax.swing.filechooser.FileFilter() {
+                    override fun accept(f: File): Boolean {
+                        return f.isDirectory || f.name.endsWith(".desktop")
+                    }
+                    override fun getDescription(): String {
+                        return "Aplicaciones de Linux (*.desktop)"
+                    }
+                }
+            }
 
-            isAcceptAllFileFilterUsed = false // No mostrar "Todos los archivos"
-            isMultiSelectionEnabled = false    // Solo un archivo a la vez
+            isAcceptAllFileFilterUsed = false
+            isMultiSelectionEnabled = false
         }
 
-        // Mostrar el diálogo NATIVO de Windows
         val result = fileChooser.showOpenDialog(null)
 
         if (result == JFileChooser.APPROVE_OPTION) {
             val selectedFile = fileChooser.selectedFile
 
-            // Validar que sea un archivo .exe válido
-            if (selectedFile.exists() && selectedFile.name.endsWith(".exe", ignoreCase = true)) {
+            // Validar según el SO
+            val isValid = when {
+                isWindows -> selectedFile.exists() && selectedFile.name.endsWith(".exe", ignoreCase = true)
+                isLinux -> selectedFile.exists() && selectedFile.name.endsWith(".desktop")
+                else -> false
+            }
 
-                // Extraer nombre automáticamente del archivo
-                val appName = selectedFile.nameWithoutExtension
-                    .replace("-", " ")
-                    .replace("_", " ")
-                    .split(" ")
-                    .joinToString(" ") { word ->
-                        word.replaceFirstChar { it.uppercase() }
+            if (!isValid) {
+                println("❌ El archivo seleccionado no es válido")
+                return@withContext null
+            }
+
+            // Procesar según el tipo de archivo
+            when {
+                selectedFile.name.endsWith(".desktop") -> {
+                    // Parsear archivo .desktop de Linux
+                    val desktopInfo = parseDesktopFileForManualAdd(selectedFile)
+                    if (desktopInfo == null) {
+                        println("❌ No se pudo parsear el archivo .desktop")
+                        return@withContext null
                     }
 
-                println("📂 Archivo seleccionado: ${selectedFile.name}")
-                println("🎯 Extrayendo icono de alta calidad...")
+                    println("📂 Archivo seleccionado: ${selectedFile.name}")
+                    println("✅ Aplicación añadida: ${desktopInfo.first}")
 
-                // Extraer icono de alta calidad (128x128 con escalado inteligente)
-                val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = 128)
-
-                if (iconBytes != null) {
-                    println("✅ Icono extraído correctamente (${iconBytes.size} bytes)")
-                } else {
-                    println("⚠️ No se pudo extraer el icono, se usará fallback")
+                    AppInfo(
+                        name = desktopInfo.first,
+                        path = desktopInfo.second,
+                        icon = "🎮",
+                        isCustom = true,
+                        description = "Añadida manualmente",
+                        iconBytes = desktopInfo.third
+                    )
                 }
+                isWindows -> {
+                    // Procesar .exe de Windows
+                    val appName = selectedFile.nameWithoutExtension
+                        .replace("-", " ")
+                        .replace("_", " ")
+                        .split(" ")
+                        .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 
-                // Crear el AppInfo con toda la información
-                AppInfo(
-                    name = appName,
-                    path = selectedFile.absolutePath,
-                    icon = "🎮", // Emoji fallback
-                    isCustom = true,
-                    description = "Añadida manualmente",
-                    iconBytes = iconBytes
-                )
-            } else {
-                println("❌ El archivo seleccionado no es válido")
-                null
+                    println("📂 Archivo seleccionado: ${selectedFile.name}")
+                    println("🎯 Extrayendo icono de alta calidad...")
+
+                    val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = 128)
+
+                    if (iconBytes != null) {
+                        println("✅ Icono extraído correctamente (${iconBytes.size} bytes)")
+                    } else {
+                        println("⚠️ No se pudo extraer el icono, se usará fallback")
+                    }
+
+                    AppInfo(
+                        name = appName,
+                        path = selectedFile.absolutePath,
+                        icon = "🎮",
+                        isCustom = true,
+                        description = "Añadida manualmente",
+                        iconBytes = iconBytes
+                    )
+                }
+                else -> null
             }
         } else {
             println("🚫 Selección cancelada por el usuario")
@@ -249,11 +285,60 @@ private suspend fun openNativeWindowsFileExplorer(): AppInfo? = withContext(Disp
     }
 }
 
-// El resto de componentes (AppListHeader, AppListItem, AppIcon, SearchBar, EmptyView, LoadingView) permanecen sin cambios.
+/**
+ * Parsea un archivo .desktop seleccionado manualmente.
+ */
+private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, String, ByteArray?>? {
+    try {
+        var name: String? = null
+        var exec: String? = null
+        var iconName: String? = null
+
+        desktopFile.readLines().forEach { line ->
+            val trimmedLine = line.trim()
+            when {
+                trimmedLine.startsWith("Name=") && name == null -> {
+                    name = trimmedLine.substringAfter("Name=")
+                }
+                trimmedLine.startsWith("Exec=") -> {
+                    exec = trimmedLine.substringAfter("Exec=")
+                }
+                trimmedLine.startsWith("Icon=") -> {
+                    iconName = trimmedLine.substringAfter("Icon=")
+                }
+            }
+        }
+
+        if (name.isNullOrBlank() || exec.isNullOrBlank()) {
+            return null
+        }
+
+        val cleanExec = exec!!
+            .replace(Regex("%[a-zA-Z]"), "")
+            .trim()
+            .split(" ")
+            .firstOrNull() ?: return null
+
+        val iconBytes = if (!iconName.isNullOrBlank()) {
+            IconExtractor.extractLinuxIcon(iconName!!)
+        } else {
+            null
+        }
+
+        return Triple(name!!, cleanExec, iconBytes)
+
+    } catch (e: Exception) {
+        println("Error parseando .desktop: ${e.message}")
+        return null
+    }
+}
+
+// ============================================================================
+// COMPONENTES DE UI (SIN CAMBIOS)
+// ============================================================================
 
 @Composable
 fun AppListHeader() {
-    // ... (Tu código sin cambios)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -264,7 +349,6 @@ fun AppListHeader() {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Columna del icono (más ancha para iconos grandes)
             Box(
                 modifier = Modifier.width(100.dp),
                 contentAlignment = Alignment.Center
@@ -276,7 +360,6 @@ fun AppListHeader() {
                 )
             }
 
-            // Columna del nombre
             Box(modifier = Modifier.weight(0.3f).padding(start = 12.dp)) {
                 Text(
                     "Nombre",
@@ -285,7 +368,6 @@ fun AppListHeader() {
                 )
             }
 
-            // Columna de la ruta
             Box(modifier = Modifier.weight(0.5f).padding(start = 12.dp)) {
                 Text(
                     "Ruta de instalación",
@@ -294,7 +376,6 @@ fun AppListHeader() {
                 )
             }
 
-            // Columna de acciones
             Box(modifier = Modifier.width(160.dp)) {
                 // Espacio para botones
             }
@@ -323,7 +404,6 @@ fun AppListItem(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icono de alta calidad (128x128 escalado a 80dp)
             Box(
                 modifier = Modifier
                     .width(100.dp)
@@ -333,7 +413,6 @@ fun AppListItem(
                 if (app.iconBytes != null) {
                     AppIcon(iconBytes = app.iconBytes, size = 80)
                 } else {
-                    // Fallback: emoji grande
                     Text(
                         text = app.icon,
                         style = MaterialTheme.typography.displayLarge
@@ -341,7 +420,6 @@ fun AppListItem(
                 }
             }
 
-            // Nombre de la aplicación
             Text(
                 text = app.name,
                 modifier = Modifier.weight(0.3f).padding(start = 12.dp),
@@ -351,7 +429,6 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // Ruta de instalación
             Text(
                 text = app.path,
                 modifier = Modifier.weight(0.5f).padding(start = 12.dp),
@@ -361,13 +438,11 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            // Botones de acción
             Row(
                 modifier = Modifier.width(160.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Botón Lanzar
                 Button(
                     onClick = onLaunch,
                     colors = ButtonDefaults.buttonColors(AppColors.Primary),
@@ -377,7 +452,6 @@ fun AppListItem(
                     Text("▶ Lanzar", style = MaterialTheme.typography.labelMedium)
                 }
 
-                // Botón Eliminar (solo para apps custom)
                 if (onRemove != null) {
                     IconButton(
                         onClick = onRemove,
@@ -391,9 +465,6 @@ fun AppListItem(
     }
 }
 
-/**
- * Componente que renderiza un icono de aplicación de alta calidad.
- */
 @Composable
 fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
     val imageBitmap = remember(iconBytes) {
@@ -410,12 +481,10 @@ fun AppIcon(iconBytes: ByteArray, size: Int = 80) {
         Image(
             painter = BitmapPainter(imageBitmap),
             contentDescription = "App Icon",
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp)), // quitamos .size()
-            contentScale = androidx.compose.ui.layout.ContentScale.None // sin reescalar
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)),
+            contentScale = androidx.compose.ui.layout.ContentScale.None
         )
     } else {
-        // Fallback: icono genérico
         Box(
             modifier = Modifier
                 .size(size.dp)

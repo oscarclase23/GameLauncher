@@ -5,15 +5,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.oscarrial.gamelauncher.data.AppInfo
 import com.oscarrial.gamelauncher.system.AppScanner
-import com.oscarrial.gamelauncher.system.PlatformService // <--- NUEVO IMPORT
+import com.oscarrial.gamelauncher.system.OperatingSystem
+import com.oscarrial.gamelauncher.system.PlatformService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 
 /**
  * ViewModel que gestiona el estado y la lógica de la pantalla del lanzador.
+ * Soporta Windows y Linux.
  */
 class LauncherViewModel {
 
@@ -29,18 +32,11 @@ class LauncherViewModel {
     var isLoading by mutableStateOf(true)
         private set
 
-    // --- NUEVAS PROPIEDADES DE SÓLO LECTURA ---
-    /**
-     * Contador de aplicaciones en la lista, se actualiza automáticamente.
-     */
+    // Propiedades computadas
     val totalAppsCount: Int
         get() = apps.size
 
-    /**
-     * Información del sistema operativo (se carga una sola vez).
-     */
     val currentOSInfo: String = PlatformService.getOsNameWithVersion()
-    // ----------------------------------------
 
     init {
         loadApps()
@@ -51,17 +47,15 @@ class LauncherViewModel {
         get() = apps.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
     /**
-     * Carga las aplicaciones asíncronamente
+     * Carga las aplicaciones del sistema asíncronamente
      */
     private fun loadApps() {
         viewModelScope.launch {
             try {
-                // Ejecutar el escaneo en el hilo de I/O
                 val scannedApps = withContext(Dispatchers.IO) {
-                    AppScanner.scanWindowsApps()
+                    AppScanner.scanSystemApps()
                 }
 
-                // Actualización en el hilo Main
                 apps = scannedApps
                 println("✅ Apps cargadas correctamente. Total: ${apps.size}")
 
@@ -82,9 +76,31 @@ class LauncherViewModel {
         searchQuery = query
     }
 
+    /**
+     * Lanza una aplicación según el sistema operativo.
+     */
     fun launchApp(app: AppInfo) {
-        // Comando para Windows
-        val command = listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
+        val os = PlatformService.getCurrentOS()
+
+        val command: List<String> = when (os) {
+            OperatingSystem.Windows -> {
+                // Windows: usar cmd.exe /c start
+                listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
+            }
+            OperatingSystem.Linux -> {
+                // Linux: ejecutar directamente o usar xdg-open si es necesario
+                // Para archivos .desktop, usar la ruta del ejecutable
+                if (app.path.endsWith(".desktop")) {
+                    listOf("gtk-launch", File(app.path).nameWithoutExtension)
+                } else {
+                    listOf(app.path)
+                }
+            }
+            else -> {
+                println("❌ Sistema operativo no soportado")
+                return
+            }
+        }
 
         println("🚀 Lanzando: ${app.name}")
         println("📝 Comando: ${command.joinToString(" ")}")
@@ -101,14 +117,12 @@ class LauncherViewModel {
     }
 
     fun addApp(app: AppInfo) {
-        // El operador '+' crea una nueva lista, lo que dispara la actualización del estado (Compose)
         apps = apps + app
         println("✅ App añadida: ${app.name}")
     }
 
     fun removeApp(app: AppInfo) {
         if (app.isCustom) {
-            // El operador '-' crea una nueva lista sin el elemento, actualizando el estado
             apps = apps - app
             println("🗑️ App eliminada: ${app.name}")
         }
