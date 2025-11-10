@@ -19,6 +19,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.ScrollbarStyle
+
 
 import com.oscarrial.gamelauncher.ui.theme.AppColors
 import com.oscarrial.gamelauncher.viewmodel.LauncherViewModel
@@ -43,16 +45,14 @@ fun AppLauncherScreen() {
     val viewModel = remember { LauncherViewModel() }
     val scope = rememberCoroutineScope()
 
-    // NUEVO: Estado para el SnackbarHost
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // NUEVO: Colectar eventos del ViewModel para mostrar el Snackbar (Toast)
     LaunchedEffect(Unit) {
         viewModel.uiEvents.collect { message ->
             snackbarHostState.showSnackbar(
                 message = message,
-                duration = SnackbarDuration.Short, // Mostrar por poco tiempo
-                withDismissAction = true // Permitir al usuario cerrarlo
+                duration = SnackbarDuration.Short,
+                withDismissAction = true
             )
         }
     }
@@ -63,22 +63,21 @@ fun AppLauncherScreen() {
     val totalAppsCount = viewModel.totalAppsCount
     val osName = viewModel.currentOSInfo
 
-    Scaffold( // <-- Usar Scaffold para añadir SnackbarHost
+    Scaffold(
         snackbarHost = {
             SnackbarHost(snackbarHostState) { data ->
                 Snackbar(
                     snackbarData = data,
-                    containerColor = AppColors.Error.copy(alpha = 0.9f), // Usar color de error para notificación
+                    containerColor = AppColors.Error.copy(alpha = 0.9f),
                     contentColor = AppColors.OnPrimary,
                 )
             }
         },
-        containerColor = AppColors.Background, // Fondo oscuro
+        containerColor = AppColors.Background,
         modifier = Modifier.fillMaxSize()
     ) { paddingValues ->
 
         Column(
-            // Aplicar el padding del Scaffold y el padding de diseño original de 24.dp
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
@@ -118,13 +117,13 @@ fun AppLauncherScreen() {
                 AppListHeader()
                 Spacer(Modifier.height(8.dp))
 
-                val listState = rememberLazyListState() // Estado para controlar el scroll
+                val listState = rememberLazyListState()
 
-                Box(modifier = Modifier.fillMaxSize()) { // Box para contener la lista y el scrollbar
+                Box(modifier = Modifier.fillMaxSize()) {
 
                     LazyColumn(
-                        state = listState, // Asignar estado
-                        modifier = Modifier.fillMaxSize().padding(end = 12.dp), // Añadir padding para que el scrollbar no tape el contenido
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().padding(end = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(
@@ -141,10 +140,19 @@ fun AppLauncherScreen() {
                         }
                     }
 
-                    // Barra de Desplazamiento Lateral (Scrollbar)
+// Barra de Desplazamiento Lateral (Scrollbar) con color blanco
                     VerticalScrollbar(
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
                         adapter = rememberScrollbarAdapter(listState),
+                        style = ScrollbarStyle(
+                            minimalHeight = 16.dp,
+                            thickness = 8.dp,
+                            shape = RoundedCornerShape(4.dp), // CORRECCIÓN 1: Se pasa el valor DP directamente.
+                            // CORRECCIÓN 2: Usar hoverColor y unhoverColor (con C mayúscula) y añadir hoverDurationMillis
+                            hoverColor = Color.White, // Color al pasar el ratón (Blanco sólido)
+                            unhoverColor = Color.White.copy(alpha = 0.7f), // Blanco semitransparente
+                            hoverDurationMillis = 500 // Tiempo de animación al pasar el ratón (500ms)
+                        )
                     )
                 } // Fin Box
             }
@@ -555,12 +563,11 @@ fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
             painter = BitmapPainter(imageBitmap),
             contentDescription = "App Icon",
             modifier = Modifier
-                .size(size.dp) // Asegura que se dibuje al tamaño correcto (64dp)
+                .size(size.dp)
                 .clip(RoundedCornerShape(8.dp)),
             contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     } else {
-        // FALLBACK: Icono predeterminado (❓) con color de error
         Box(
             modifier = Modifier
                 .size(size.dp)
@@ -569,9 +576,9 @@ fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                "❓", // Icono de interrogación
+                "❓",
                 style = MaterialTheme.typography.titleLarge,
-                color = AppColors.Error // Color de error para alta visibilidad
+                color = AppColors.Error
             )
         }
     }
