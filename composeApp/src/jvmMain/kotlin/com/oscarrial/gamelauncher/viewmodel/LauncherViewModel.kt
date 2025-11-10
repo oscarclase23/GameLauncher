@@ -13,6 +13,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+// NUEVAS IMPORTACIONES PARA EVENTOS DE UI (SNACKBAR)
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * ViewModel que gestiona el estado y la lógica de la pantalla del lanzador.
@@ -31,6 +34,10 @@ class LauncherViewModel {
 
     var isLoading by mutableStateOf(true)
         private set
+
+    // PROPIEDADES NUEVAS: Channel para eventos de UI (como SnackBar)
+    private val _uiEvents = Channel<String>(Channel.BUFFERED)
+    val uiEvents = _uiEvents.receiveAsFlow()
 
     // Propiedades computadas
     val totalAppsCount: Int
@@ -125,6 +132,14 @@ class LauncherViewModel {
     }
 
     fun addApp(app: AppInfo) {
+        if (apps.any { it.path.equals(app.path, ignoreCase = true) }) {
+            val message = "🚫 App ya existente: ${app.name}. No se añadió."
+            println(message)
+            viewModelScope.launch {
+                _uiEvents.send(message) // <-- ENVIAR EVENTO DE DUPLICADO A LA UI
+            }
+            return
+        }
         apps = apps + app
         println("✅ App añadida: ${app.name}")
     }

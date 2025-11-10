@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
@@ -16,6 +17,9 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.rememberScrollbarAdapter
+
 import com.oscarrial.gamelauncher.ui.theme.AppColors
 import com.oscarrial.gamelauncher.viewmodel.LauncherViewModel
 import com.oscarrial.gamelauncher.data.AppInfo
@@ -39,19 +43,47 @@ fun AppLauncherScreen() {
     val viewModel = remember { LauncherViewModel() }
     val scope = rememberCoroutineScope()
 
+    // NUEVO: Estado para el SnackbarHost
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // NUEVO: Colectar eventos del ViewModel para mostrar el Snackbar (Toast)
+    LaunchedEffect(Unit) {
+        viewModel.uiEvents.collect { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short, // Mostrar por poco tiempo
+                withDismissAction = true // Permitir al usuario cerrarlo
+            )
+        }
+    }
+
     val filteredApps = viewModel.filteredApps
     val searchQuery = viewModel.searchQuery
     val isLoading = viewModel.isLoading
     val totalAppsCount = viewModel.totalAppsCount
     val osName = viewModel.currentOSInfo
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AppColors.Background)
-            .padding(24.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    Scaffold( // <-- Usar Scaffold para añadir SnackbarHost
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = AppColors.Error.copy(alpha = 0.9f), // Usar color de error para notificación
+                    contentColor = AppColors.OnPrimary,
+                )
+            }
+        },
+        containerColor = AppColors.Background, // Fondo oscuro
+        modifier = Modifier.fillMaxSize()
+    ) { paddingValues ->
+
+        Column(
+            // Aplicar el padding del Scaffold y el padding de diseño original de 24.dp
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(24.dp)
+        ) {
 
             // Header
             AppHeader(
@@ -86,26 +118,38 @@ fun AppLauncherScreen() {
                 AppListHeader()
                 Spacer(Modifier.height(8.dp))
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(
-                        items = filteredApps,
-                        key = { it.path }
-                    ) { app ->
-                        AppListItem(
-                            app = app,
-                            onLaunch = { viewModel.launchApp(app) },
-                            onRemove = if (app.isCustom) {
-                                { viewModel.removeApp(app) }
-                            } else null
-                        )
+                val listState = rememberLazyListState() // Estado para controlar el scroll
+
+                Box(modifier = Modifier.fillMaxSize()) { // Box para contener la lista y el scrollbar
+
+                    LazyColumn(
+                        state = listState, // Asignar estado
+                        modifier = Modifier.fillMaxSize().padding(end = 12.dp), // Añadir padding para que el scrollbar no tape el contenido
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            items = filteredApps,
+                            key = { it.path }
+                        ) { app ->
+                            AppListItem(
+                                app = app,
+                                onLaunch = { viewModel.launchApp(app) },
+                                onRemove = if (app.isCustom) {
+                                    { viewModel.removeApp(app) }
+                                } else null
+                            )
+                        }
                     }
-                }
+
+                    // Barra de Desplazamiento Lateral (Scrollbar)
+                    VerticalScrollbar(
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                        adapter = rememberScrollbarAdapter(listState),
+                    )
+                } // Fin Box
             }
         }
-    }
+    } // Fin Scaffold
 }
 
 // ============================================================================
@@ -443,14 +487,8 @@ fun AppListItem(
                     .height(80.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (app.iconBytes != null) {
-                    AppIcon(iconBytes = app.iconBytes, size = ICON_EXTRACTION_SIZE) // Usa el tamaño de extracción
-                } else {
-                    Text(
-                        text = app.icon,
-                        style = MaterialTheme.typography.displayLarge
-                    )
-                }
+                // Usar AppIcon directamente, que maneja el fallback
+                AppIcon(iconBytes = app.iconBytes, size = ICON_EXTRACTION_SIZE)
             }
 
             Text(
@@ -499,8 +537,10 @@ fun AppListItem(
 }
 
 @Composable
-fun AppIcon(iconBytes: ByteArray, size: Int = ICON_EXTRACTION_SIZE) {
+fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
     val imageBitmap = remember(iconBytes) {
+        if (iconBytes == null) return@remember null
+
         try {
             val skiaImage = SkiaImage.makeFromEncoded(iconBytes)
             skiaImage.toComposeImageBitmap()
@@ -520,13 +560,19 @@ fun AppIcon(iconBytes: ByteArray, size: Int = ICON_EXTRACTION_SIZE) {
             contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     } else {
+        // FALLBACK: Icono predeterminado (❓) con color de error
         Box(
             modifier = Modifier
                 .size(size.dp)
-                .background(AppColors.SurfaceVariant, RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.SurfaceVariant),
             contentAlignment = Alignment.Center
         ) {
-            Text("🎮", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "❓", // Icono de interrogación
+                style = MaterialTheme.typography.titleLarge,
+                color = AppColors.Error // Color de error para alta visibilidad
+            )
         }
     }
 }
