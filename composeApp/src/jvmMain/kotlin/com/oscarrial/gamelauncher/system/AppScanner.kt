@@ -5,15 +5,14 @@ import java.io.File
 
 /**
  * Servicio encargado de escanear aplicaciones del sistema.
- * Soporta Windows y Linux.
- * @author Modificado para Linux, filtro de esenciales y corrección de sobrecarga.
+ * Soporta Windows y Linux (incluyendo Snap y Flatpak).
  */
 object AppScanner {
 
     private val USER_HOME = System.getProperty("user.home")
-    private const val DEFAULT_FALLBACK_ICON = "🎮" // Icono único de fallback
+    private const val DEFAULT_FALLBACK_ICON = "🎮"
 
-    // ==================== RUTAS Y DATOS DE WINDOWS ====================
+    // ==================== RUTAS DE WINDOWS ====================
 
     private val WINDOWS_PROGRAM_FILES = listOf(
         "C:\\Program Files",
@@ -34,19 +33,37 @@ object AppScanner {
     private val ALL_WINDOWS_PATHS = WINDOWS_PROGRAM_FILES + WINDOWS_APP_DATA_PATHS
 
     private val KNOWN_APPS = mapOf(
-        "intellij" to listOf("idea64.exe", "idea.exe"), "androidstudio" to listOf("studio64.exe", "studio.exe"),
-        "visualstudio" to listOf("devenv.exe"), "vscode" to listOf("code.exe"), "pycharm" to listOf("pycharm64.exe", "pycharm.exe"),
-        "chrome" to listOf("chrome.exe"), "firefox" to listOf("firefox.exe"), "edge" to listOf("msedge.exe"),
-        "discord" to listOf("discord.exe"), "slack" to listOf("slack.exe"), "teams" to listOf("teams.exe"),
-        "steam" to listOf("steam.exe"), "notepad++" to listOf("notepad++.exe"), "7zip" to listOf("7zfm.exe"),
-        "winrar" to listOf("winrar.exe"), "gimp" to listOf("gimp-2.10.exe", "gimp.exe"), "photoshop" to listOf("photoshop.exe"),
-        "word" to listOf("winword.exe"), "excel" to listOf("excel.exe"), "powerpoint" to listOf("powerpnt.exe"),
-        "outlook" to listOf("outlook.exe"), "notion" to listOf("notion.exe")
+        "intellij" to listOf("idea64.exe", "idea.exe"),
+        "androidstudio" to listOf("studio64.exe", "studio.exe"),
+        "visualstudio" to listOf("devenv.exe"),
+        "vscode" to listOf("code.exe"),
+        "pycharm" to listOf("pycharm64.exe", "pycharm.exe"),
+        "chrome" to listOf("chrome.exe"),
+        "firefox" to listOf("firefox.exe"),
+        "edge" to listOf("msedge.exe"),
+        "discord" to listOf("discord.exe"),
+        "slack" to listOf("slack.exe"),
+        "teams" to listOf("teams.exe"),
+        "steam" to listOf("steam.exe"),
+        "notepad++" to listOf("notepad++.exe"),
+        "7zip" to listOf("7zfm.exe"),
+        "winrar" to listOf("winrar.exe"),
+        "gimp" to listOf("gimp-2.10.exe", "gimp.exe"),
+        "photoshop" to listOf("photoshop.exe"),
+        "word" to listOf("winword.exe"),
+        "excel" to listOf("excel.exe"),
+        "powerpoint" to listOf("powerpnt.exe"),
+        "outlook" to listOf("outlook.exe"),
+        "notion" to listOf("notion.exe")
     )
 
     private val SYSTEM_APPS = mapOf(
-        "Calculadora" to "calc.exe", "Paint" to "mspaint.exe", "Notepad" to "notepad.exe",
-        "Explorador" to "explorer.exe", "CMD" to "cmd.exe", "PowerShell" to "powershell.exe"
+        "Calculadora" to "calc.exe",
+        "Paint" to "mspaint.exe",
+        "Notepad" to "notepad.exe",
+        "Explorador" to "explorer.exe",
+        "CMD" to "cmd.exe",
+        "PowerShell" to "powershell.exe"
     )
 
     private val IGNORED_NAMES = setOf(
@@ -65,31 +82,35 @@ object AppScanner {
         "common", "commonfiles", "shared", "lib", "libs", "library", "bin32",
         "data", "temp", "cache", "logs", "resources", "assets", "locales",
         "uninstall", "old", "backup", "system", "windows nt", "windowsapps"
-    ).map { it.lowercase().replace(" ", "") }.toSet()
+    ).map { it.lowercase().replace(" ", "").replace("-", "") }.toSet()
 
-
-    // ==================== RUTAS Y NOMBRES DE LINUX ====================
+    // ==================== RUTAS DE LINUX ====================
 
     private val LINUX_APPLICATION_PATHS = listOf(
+        // Rutas estándar
         "/usr/share/applications",
         "/usr/local/share/applications",
         "$USER_HOME/.local/share/applications",
+
+        // Snap
+        "/var/lib/snapd/desktop/applications",
+        // Flatpak (Sistema)
+        "/var/lib/flatpak/exports/share/applications",
+        // Flatpak (Usuario)
+        "$USER_HOME/.local/share/flatpak/exports/share/applications"
     )
 
-    // Lista de ejecutables/nombres esenciales para incluir las apps de sistema pedidas
     private val ESSENTIAL_LINUX_NAMES = listOf(
         "nautilus", "firefox", "terminal", "settings", "calculator",
         "clock", "calendar", "maps", "photos", "evince",
         "totem", "rhythmbox", "screenshot", "gedit", "monitor",
-        "disks", "konsole", "xfce4-terminal", "tilix", "software", "update"
+        "disks", "konsole", "xfce4-terminal", "tilix", "software", "update",
+        // ✅ AÑADIDO: Apps de desarrollo conocidas (para evitar filtros)
+        "code", "vscode", "intellij", "androidstudio", "pycharm", "clion"
     ).map { it.lowercase() }
 
+    // ==================== FUNCIÓN PRINCIPAL ====================
 
-    // ==================== FUNCIÓN PÚBLICA PRINCIPAL ====================
-
-    /**
-     * Función principal que escanea aplicaciones según el sistema operativo detectado.
-     */
     fun scanSystemApps(): List<AppInfo> {
         val osName = System.getProperty("os.name", "").lowercase()
 
@@ -105,21 +126,14 @@ object AppScanner {
 
     // ==================== WINDOWS SCANNING ====================
 
-    /**
-     * Escanea todas las aplicaciones de Windows.
-     */
     private fun scanWindowsApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
         println("🔍 Iniciando escaneo de aplicaciones de Windows...")
 
-        // 1. Aplicaciones del sistema (Calculadora, Paint, etc.)
         foundApps.addAll(scanWindowsSystemApps())
-
-        // 2. Aplicaciones conocidas
         foundApps.addAll(scanKnownApps())
 
-        // 3. Escanear carpetas normales
         for (basePath in ALL_WINDOWS_PATHS) {
             val baseDir = File(basePath)
             if (baseDir.exists() && baseDir.isDirectory) {
@@ -142,10 +156,6 @@ object AppScanner {
             .sortedBy { it.name }
     }
 
-    /**
-     * Escanea las aplicaciones internas de Windows (Calculadora, Paint, etc.)
-     * RENOMBRADA a scanWindowsSystemApps para solucionar el error de sobrecarga.
-     */
     private fun scanWindowsSystemApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
@@ -283,10 +293,6 @@ object AppScanner {
         return false
     }
 
-
-    /**
-     * Crea un AppInfo desde un archivo ejecutable de Windows.
-     */
     private fun createAppInfoFromWindowsFile(file: File, folderName: String? = null): AppInfo {
         val name = (folderName ?: file.nameWithoutExtension)
             .replace("-", " ")
@@ -296,7 +302,7 @@ object AppScanner {
 
         println("  🎨 Extrayendo icono de: ${file.name}")
         val iconBytes = try {
-            IconExtractor.extractIconAsBytes(file.absolutePath, size = 64) // TAMAÑO 64px
+            IconExtractor.extractIconAsBytes(file.absolutePath, size = 64)
         } catch (e: Exception) {
             println("  ⚠️ Error extrayendo icono de ${file.name}: ${e.message}")
             null
@@ -319,18 +325,17 @@ object AppScanner {
 
     // ==================== LINUX SCANNING ====================
 
-    /**
-     * Escanea aplicaciones de Linux analizando archivos .desktop,
-     * filtrando solo apps útiles con icono.
-     */
     private fun scanLinuxApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
-        println("🔍 Iniciando escaneo de aplicaciones de Linux...")
+        println("🔍 Iniciando escaneo de aplicaciones de Linux (incluyendo Snap/Flatpak)...")
 
         for (appPath in LINUX_APPLICATION_PATHS) {
             val appDir = File(appPath)
-            if (!appDir.exists() || !appDir.isDirectory) continue
+            if (!appDir.exists() || !appDir.isDirectory) {
+                println("  ⏭️ Ruta no encontrada: $appPath")
+                continue
+            }
 
             println("📂 Escaneando: $appPath")
 
@@ -353,9 +358,6 @@ object AppScanner {
             .sortedBy { it.name }
     }
 
-    /**
-     * Parsea un archivo .desktop de Linux con filtros relajados y verificación de iconos.
-     */
     private fun parseDesktopFile(desktopFile: File): AppInfo? {
         var name: String? = null
         var exec: String? = null
@@ -367,7 +369,7 @@ object AppScanner {
         desktopFile.readLines().forEach { line ->
             val trimmedLine = line.trim()
             when {
-                // ... (Lógica de parsing de las líneas) ...
+                trimmedLine.startsWith("[Desktop Entry]") -> {}
                 trimmedLine.startsWith("Name=") && name == null -> name = trimmedLine.substringAfter("Name=")
                 trimmedLine.startsWith("Exec=") -> {
                     exec = trimmedLine.substringAfter("Exec=")
@@ -388,90 +390,63 @@ object AppScanner {
             return null
         }
 
-        // ... (Lógica de filtrado de agentes y triviales) ...
         val normalizedExec = cleanExec!!.lowercase()
         val normalizedName = name!!.lowercase().replace(" ", "").replace("-", "")
 
-        val isNotMainApp = normalizedExec.contains("handler", ignoreCase = true) ||
-                normalizedExec.contains("agent", ignoreCase = true) ||
-                normalizedExec.contains("daemon", ignoreCase = true) ||
-                normalizedExec.contains("crash", ignoreCase = true)
+        // 🔍 Evitar subprocesos irrelevantes (daemons, helpers, etc.)
+        val isNotMainApp = normalizedExec.contains("handler") ||
+                normalizedExec.contains("agent") ||
+                normalizedExec.contains("daemon") ||
+                normalizedExec.contains("crash")
 
-        if (isNotMainApp) {
-            if (!ESSENTIAL_LINUX_NAMES.any { normalizedExec.contains(it) || normalizedName.contains(it) }) {
-                return null
-            }
-        }
-
-        // CORRECCIÓN: Si resolveExecutablePath falla, es NULL y descartamos (return null)
-        // Si resolveExecutablePath tiene éxito, la ruta es absoluta
-        val executablePath = resolveExecutablePath(cleanExec!!)
-        if (executablePath.isNullOrBlank()) {
-            println("  🚫 No se pudo resolver la ruta absoluta para: $name. Descartando.")
+        if (isNotMainApp && ESSENTIAL_LINUX_NAMES.none { normalizedExec.contains(it) || normalizedName.contains(it) }) {
             return null
         }
 
-        // --- Extracción y Filtrado por Icono ---
+        val finalPath = resolveExecutablePath(cleanExec!!)
 
-        val iconBytes = if (!iconName.isNullOrBlank()) {
-            IconExtractor.extractLinuxIcon(iconName!!)
-        } else {
-            null
+
+        if (finalPath.isNullOrBlank()) {
+            println("  ⚠️ No se pudo resolver el ejecutable de $name (exec=$cleanExec)")
+            return null
         }
 
-        // FILTRADO DE APPS SIN ICONO: Si no hay icono, ignorar la app
+        // 🎨 Cargar icono (mejorado)
+        val iconBytes = iconName?.let { IconExtractor.extractLinuxIcon(it) }
+
         if (iconBytes == null) {
-            println("  🚫 Aplicación sin icono ignorada: $name")
-            return null
+            println("  ⚠️ Sin icono, usando fallback para: $name")
+        } else {
+            println("  ✅ Aplicación detectada: $name")
         }
-
-        println("  ✅ Aplicación encontrada: $name")
 
         return AppInfo(
             name = name!!,
-            path = executablePath, // AHORA ESTA RUTA DEBE SER ABSOLUTA
+            path = finalPath,
             icon = DEFAULT_FALLBACK_ICON,
             description = comment ?: "Aplicación de Linux",
             iconBytes = iconBytes
         )
     }
 
-    /**
-     * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH.
-     * Retorna NULL si no puede resolver una ruta ejecutable existente.
-     */
-    private fun resolveExecutablePath(command: String): String? {
-        // Lista de ubicaciones a verificar, incluyendo el comando directo si es una ruta absoluta
-        val searchFiles = mutableListOf<File>()
 
-        if (command.startsWith("/")) {
-            // Si es una ruta absoluta, se añade como primer candidato
-            searchFiles.add(File(command))
+    private fun resolveExecutablePath(exec: String): String? {
+        val file = File(exec)
+        if (file.exists()) return file.absolutePath
+
+        // 🔍 Si no empieza por /, buscamos en el PATH del sistema
+        val pathDirs = System.getenv("PATH")?.split(":") ?: emptyList()
+        for (dir in pathDirs) {
+            val candidate = File(dir, exec)
+            if (candidate.exists()) return candidate.absolutePath
         }
 
-        // Buscar en el PATH si es solo un comando (ej: "vim")
-        val pathEnv = System.getenv("PATH") ?: ""
-        for (path in pathEnv.split(":")) {
-            searchFiles.add(File(path, command))
+        // ⚙️ Si es un comando flatpak o snap, mantenemos el texto tal cual
+        return when {
+            exec.startsWith("flatpak") || exec.startsWith("snap") -> exec
+            else -> null
         }
-
-        for (file in searchFiles) {
-            if (file.exists() && file.canExecute()) {
-                return try {
-                    // Intentar obtener la ruta canónica para resolver symlinks (como vim -> /usr/bin/vim.basic)
-                    file.canonicalPath
-                } catch (e: Exception) {
-                    // Si falla (IOException al resolver), volvemos a la ruta absoluta
-                    file.absolutePath
-                }
-            }
-        }
-
-        // Si no se pudo encontrar o resolver una ruta ejecutable existente, descartamos.
-        return null
     }
-
-    // ==================== HELPERS ====================
 
     private fun String.capitalize(): String {
         return replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }

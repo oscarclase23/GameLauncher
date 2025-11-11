@@ -48,9 +48,10 @@ fun AppLauncherScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
-        viewModel.uiEvents.collect { message ->
+        // MODIFICADO: Recibir UiEvent en lugar de String
+        viewModel.uiEvents.collect { event ->
             snackbarHostState.showSnackbar(
-                message = message,
+                message = event.message,
                 duration = SnackbarDuration.Short,
                 withDismissAction = true
             )
@@ -65,10 +66,20 @@ fun AppLauncherScreen() {
 
     Scaffold(
         snackbarHost = {
+            // MODIFICADO: SnackbarHost para determinar el color
             SnackbarHost(snackbarHostState) { data ->
+                // ELIMINAR ESTA LÍNEA QUE CAUSA EL ERROR:
+                // val isError = viewModel.uiEvents.receiveAsFlow().collectAsState(initial = null).value?.isError ?: false
+
                 Snackbar(
                     snackbarData = data,
-                    containerColor = AppColors.Error.copy(alpha = 0.9f),
+                    // LÓGICA DE COLOR CORREGIDA: Usamos el mensaje para determinar el color.
+                    // Esto asume que el ViewModel siempre incluye una palabra o emoji de error.
+                    containerColor = if (data.visuals.message.contains("Error") || data.visuals.message.contains("🚫") || data.visuals.message.contains("❌")) {
+                        AppColors.Error.copy(alpha = 0.9f)
+                    } else {
+                        AppColors.Primary.copy(alpha = 0.9f) // Color para éxito/información
+                    },
                     contentColor = AppColors.OnPrimary,
                 )
             }

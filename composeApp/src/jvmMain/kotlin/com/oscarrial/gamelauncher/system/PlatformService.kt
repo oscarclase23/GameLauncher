@@ -1,7 +1,7 @@
 package com.oscarrial.gamelauncher.system
 
 /**
- * Define las plataformas de sistema operativo que soporta la aplicación.
+ * Define las plataformas de sistema operativo soportadas.
  */
 enum class OperatingSystem {
     Windows,
@@ -11,7 +11,7 @@ enum class OperatingSystem {
 }
 
 /**
- * Clase de utilidad para identificar el SO.
+ * Utilidad para identificar el sistema operativo.
  */
 object PlatformService {
 
@@ -27,7 +27,6 @@ object PlatformService {
 
     /**
      * Devuelve el nombre amigable del sistema operativo con versión.
-     * Esto será visible en la interfaz de usuario.
      */
     fun getOsNameWithVersion(): String {
         val osNameProperty = System.getProperty("os.name", "Unknown OS")
@@ -35,7 +34,6 @@ object PlatformService {
 
         return when (getCurrentOS()) {
             OperatingSystem.Windows -> {
-                // Intentar obtener un nombre más amigable para Windows 10/11
                 val friendlyName = when {
                     osNameProperty.contains("11") -> "Windows 11"
                     osNameProperty.contains("10") -> "Windows 10"
@@ -46,17 +44,6 @@ object PlatformService {
             OperatingSystem.MacOS -> "macOS (v${osVersion})"
             OperatingSystem.Linux -> "Linux (${osNameProperty})"
             OperatingSystem.Other -> osNameProperty
-        }
-    }
-
-    /**
-     * Devuelve el prefijo base del comando de shell.
-     */
-    fun getLaunchPrefix(): String {
-        return when (getCurrentOS()) {
-            OperatingSystem.Windows -> "cmd.exe /c start "
-            OperatingSystem.Linux, OperatingSystem.MacOS -> "/bin/bash -c "
-            OperatingSystem.Other -> ""
         }
     }
 }

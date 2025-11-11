@@ -13,13 +13,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-// NUEVAS IMPORTACIONES PARA EVENTOS DE UI (SNACKBAR)
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 
+// NUEVO: Clase de datos para eventos de UI (mensajes y su tipo/color)
+data class UiEvent(
+    val message: String,
+    val isError: Boolean = false
+)
+
 /**
  * ViewModel que gestiona el estado y la lógica de la pantalla del lanzador.
- * Soporta Windows y Linux.
+ * Soporta Windows y Linux (incluyendo Snap/Flatpak).
  */
 class LauncherViewModel {
 
@@ -35,8 +40,8 @@ class LauncherViewModel {
     var isLoading by mutableStateOf(true)
         private set
 
-    // PROPIEDADES NUEVAS: Channel para eventos de UI (como SnackBar)
-    private val _uiEvents = Channel<String>(Channel.BUFFERED)
+    // Channel para eventos de UI (SnackBar) - AHORA USA UiEvent
+    private val _uiEvents = Channel<UiEvent>(Channel.BUFFERED)
     val uiEvents = _uiEvents.receiveAsFlow()
 
     // Propiedades computadas
@@ -71,13 +76,14 @@ class LauncherViewModel {
                 e.printStackTrace()
                 apps = emptyList()
 
+                // MODIFICADO: Notificar al usuario del error
+                _uiEvents.send(UiEvent("Error al escanear aplicaciones: ${e.message}", isError = true))
+
             } finally {
                 isLoading = false
             }
         }
     }
-
-    // --- ACCIONES ---
 
     fun updateSearchQuery(query: String) {
         searchQuery = query
@@ -91,28 +97,24 @@ class LauncherViewModel {
 
         val command: List<String> = when (os) {
             OperatingSystem.Windows -> {
-                // Windows: usar cmd.exe /c start
                 listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
             }
             OperatingSystem.Linux -> {
                 val path = app.path
 
-                // Usamos bash -c si la ruta NO es absoluta (es decir, es un comando en el PATH, como 'vim').
-                // Si la ruta absoluta fue resuelta por parseDesktopFileForManualAdd, se ejecuta directamente.
                 if (path.startsWith("/")) {
-                    // Ruta absoluta (e.g., /usr/bin/vim). Ejecutar directamente.
                     listOf(path)
                 } else if (path.endsWith(".desktop")) {
-                    // Si la ruta original del .desktop se pasó como fallback (en caso de que el 'Exec=' no fuera resoluble),
-                    // usamos gtk-launch o fallamos, aunque la lógica del parseo manual debería evitar esto.
                     listOf("gtk-launch", File(app.path).nameWithoutExtension)
                 } else {
-                    // Comando simple (e.g., vim). Ejecutar a través de bash -c.
                     listOf("/bin/bash", "-c", path)
                 }
             }
             else -> {
                 println("❌ Sistema operativo no soportado")
+                viewModelScope.launch {
+                    _uiEvents.send(UiEvent("Sistema operativo no soportado", isError = true))
+                }
                 return
             }
         }
@@ -122,32 +124,70 @@ class LauncherViewModel {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                ProcessBuilder(command).start()
+                val process = ProcessBuilder(command).start()
+
+                // OPCIONAL: Esperar un momento para verificar si el proceso se inició
+                val exitCode = process.waitFor()
+                if (exitCode != 0) {
+                    withContext(Dispatchers.Main) {
+                        _uiEvents.send(UiEvent("⚠️ ${app.name} terminó con código de error: $exitCode", isError = true))
+                    }
+                }
+
             } catch (e: IOException) {
                 println("❌ ERROR: No se pudo lanzar ${app.name}")
                 println("Ruta: ${app.path}")
                 e.printStackTrace()
+
+                // MODIFICADO: Notificar al usuario del error
+                withContext(Dispatchers.Main) {
+                    _uiEvents.send(UiEvent("❌ Error al lanzar ${app.name}: ${e.message ?: "Ruta inválida"}", isError = true))
+                }
+            } catch (e: Exception) {
+                println("❌ ERROR inesperado: ${e.message}")
+                e.printStackTrace()
+
+                withContext(Dispatchers.Main) {
+                    _uiEvents.send(UiEvent("❌ Error inesperado al lanzar ${app.name}", isError = true))
+                }
             }
         }
     }
 
+    /**
+     * Añade una aplicación manualmente.
+     */
     fun addApp(app: AppInfo) {
         if (apps.any { it.path.equals(app.path, ignoreCase = true) }) {
             val message = "🚫 App ya existente: ${app.name}. No se añadió."
             println(message)
             viewModelScope.launch {
-                _uiEvents.send(message) // <-- ENVIAR EVENTO DE DUPLICADO A LA UI
+                // MODIFICADO: Usar color de error (isError=true)
+                _uiEvents.send(UiEvent(message, isError = true))
             }
             return
         }
         apps = apps + app
         println("✅ App añadida: ${app.name}")
+
+        // MODIFICADO: Notificar éxito al usuario (isError=false, usa el color por defecto/Primary)
+        viewModelScope.launch {
+            _uiEvents.send(UiEvent("✅ ${app.name} añadida correctamente", isError = false))
+        }
     }
 
+    /**
+     * Elimina una aplicación personalizada.
+     */
     fun removeApp(app: AppInfo) {
         if (app.isCustom) {
             apps = apps - app
             println("🗑️ App eliminada: ${app.name}")
+
+            // MODIFICADO: Usar color de éxito/neutral (isError=false)
+            viewModelScope.launch {
+                _uiEvents.send(UiEvent("🗑️ ${app.name} eliminada", isError = false))
+            }
         }
     }
 }
