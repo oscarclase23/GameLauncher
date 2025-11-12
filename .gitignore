@@ -19,5 +19,5 @@ captures
 node_modules/
 
 **/*.zip
-!archivo_1.zip
-!archivo_2.zip
+!ejecutable_linux.zip
+!ejecutable_windows.zip
