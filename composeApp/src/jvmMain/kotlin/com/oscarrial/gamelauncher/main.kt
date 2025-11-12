@@ -18,7 +18,6 @@ fun main() = application {
         title = "Lanzador de Aplicaciones - Oscar Rial",
         state = windowState
     ) {
-        // ✅ TAMAÑO MÍNIMO DE VENTANA (permite ver todos los elementos perfectamente)
         window.minimumSize = java.awt.Dimension(1200, 700)
 
         GameLauncherTheme {
