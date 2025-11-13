@@ -1,0 +1,121 @@
+# Nombre del Workflow
+name: Crear y Publicar Release
+
+# 1. DISPARADOR:
+# Este workflow se ejecuta cuando se hace push a una etiqueta (tag)
+# que comience con 'v' (ej: v1.0.0, v1.2)
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 2. TAREAS (JOBS):
+jobs:
+  # ----------------------------------------------------
+  # TAREA 1: Compilar en Windows y Linux
+  # ----------------------------------------------------
+  build:
+    name: Build en ${{ matrix.os }}
+    # Usa una matriz para correr esta tarea en paralelo en ambos OS
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      # 1. Descarga tu código fuente
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      # 2. Configura Java (JDK) 17 para Gradle
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          # Usar caché de Gradle (opcional pero recomendado)
+          cache: 'gradle'
+
+      # 3. (Solo Linux) Dar permisos de ejecución a gradlew
+      - name: Dar permisos de ejecución a gradlew (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: chmod +x gradlew
+
+      # 4. (Solo Linux) Instalar dependencias para .deb
+      # Necesario para el empaquetado nativo en Compose Desktop
+      - name: 🛠️ Instalar dependencias de Linux (dpkg)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot dpkg
+        shell: bash
+
+      # 5. Limpia y Ejecuta el comando de Build de Gradle
+      # packageDistributionForCurrentOS genera los instaladores nativos
+      - name: 🏗️ Limpiar y Ejecutar Build con Gradle
+        run: |
+          if ($env:RUNNER_OS -eq "Windows") {
+            .\gradlew.bat clean packageDistributionForCurrentOS
+          } else {
+            ./gradlew clean packageDistributionForCurrentOS
+          }
+        shell: pwsh # Usamos pwsh para el condicional de OS
+
+      # 6. Prepara el instalador de Windows (Ruta corregida)
+      - name: 📦 Preparar artefacto (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir dist
+          # El archivo .msi se genera dentro de composeApp/build/...
+          move composeApp/build/compose/binaries/main/msi/*.msi dist/lanzador-de-apps-windows.msi
+        shell: pwsh
+
+      # 7. Prepara el instalador de Linux (Ruta corregida)
+      - name: 📦 Preparar artefacto (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p dist
+          # El archivo .deb se genera dentro de composeApp/build/...
+          mv composeApp/build/compose/binaries/main/deb/*.deb dist/lanzador-de-apps-linux.deb
+
+      # 8. Guarda los instaladores temporalmente
+      - name: 💾 Guardar artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: dist/
+
+  # ----------------------------------------------------
+  # TAREA 2: Crear la Release en GitHub
+  # ----------------------------------------------------
+  release:
+    name: Crear Release
+    needs: build # Espera a que la tarea de build termine
+    runs-on: ubuntu-latest
+
+    # Permiso crucial para que la acción de release pueda escribir contenido
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Descarga el instalador de Windows
+      - name: ⬇️ Descargar artefacto (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-windows-latest
+          path: installers/windows
+
+      # 2. Descarga el instalador de Linux
+      - name: ⬇️ Descargar artefacto (Linux)
+        uses: actions/download-artifact@v4
+        with:
+          name: installer-ubuntu-latest
+          path: installers/linux
+
+      # 3. Crea la Release y sube los dos archivos
+      - name: 🚀 Publicar en GitHub Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            installers/windows/*
+            installers/linux/*

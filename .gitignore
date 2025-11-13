@@ -17,7 +17,3 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
-
-**/*.zip
-!ejecutable_linux.zip
-!ejecutable_windows.zip
