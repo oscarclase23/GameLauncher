@@ -87,6 +87,8 @@ Descarga desde:
 
 ## 🧪 Pruebas Realizadas
 
+### Pruebas Funcionales Manuales
+
 El proyecto cuenta con pruebas manuales que verifican:
 
 * Detección del sistema operativo.
@@ -96,6 +98,18 @@ El proyecto cuenta con pruebas manuales que verifican:
 * Añadir y eliminar apps personalizadas.
 * Búsqueda en tiempo real.
 * Limpieza de filtros y refresco de la lista.
+
+### Pruebas Unitarias (JUnit)
+
+Tests automatizados implementados con **Kotlin Test**:
+
+| Componente | Cobertura |
+|------------|-----------|
+| `AppInfoTest` | Creación, equals, hashCode, manejo de ByteArray |
+| `PlatformServiceTest` | Detección del SO y formato de versión |
+| `LauncherViewModelTest` | Estado inicial, búsqueda, añadir/eliminar apps, filtrado |
+| `UiEventTest` | Eventos de éxito y error |
+| `AppScannerTest` | Escaneo básico del sistema |
 
 Todas las pruebas se superaron satisfactoriamente.
 
