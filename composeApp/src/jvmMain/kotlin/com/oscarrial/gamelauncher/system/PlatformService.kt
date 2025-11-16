@@ -15,6 +15,7 @@ enum class OperatingSystem {
  */
 object PlatformService {
 
+    // Función que detecta y retorna el tipo de sistema operativo actual.
     fun getCurrentOS(): OperatingSystem {
         val osName = System.getProperty("os.name", "generic").lowercase()
         return when {
@@ -26,8 +27,9 @@ object PlatformService {
     }
 
     /**
-     * Devuelve el nombre amigable del sistema operativo con versión.
+     * Devuelve el nombre del sistema operativo con versión.
      */
+    // Función que recupera y formatea el nombre y la versión del sistema operativo para mostrarlo.
     fun getOsNameWithVersion(): String {
         val osNameProperty = System.getProperty("os.name", "Unknown OS")
         val osVersion = System.getProperty("os.version", "")

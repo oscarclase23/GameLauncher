@@ -16,50 +16,63 @@ import java.io.IOException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 
-// NUEVO: Clase de datos para eventos de UI (mensajes y su tipo/color)
+/**
+ * Evento genérico para comunicar mensajes a la UI (errores, avisos, éxitos).
+ */
 data class UiEvent(
     val message: String,
     val isError: Boolean = false
 )
 
 /**
- * ViewModel que gestiona el estado y la lógica de la pantalla del lanzador.
- * Soporta Windows y Linux (incluyendo Snap/Flatpak).
+ * ViewModel principal del lanzador.
+ * Gestiona:
+ * - Carga de aplicaciones del sistema
+ * - Búsqueda y filtrado
+ * - Ejecución de aplicaciones según el sistema operativo
+ * - Notificaciones a la interfaz mediante eventos
  */
 class LauncherViewModel {
 
+    // Alcance de corrutinas asociado al ViewModel.
     private val viewModelScope = CoroutineScope(Dispatchers.Main)
 
-    // Estados
+    // Estado principal de la lista de aplicaciones.
     var apps by mutableStateOf(emptyList<AppInfo>())
         private set
 
+    // Valor actual del texto de búsqueda.
     var searchQuery by mutableStateOf("")
         private set
 
+    // Indica si se está realizando el escaneo inicial.
     var isLoading by mutableStateOf(true)
         private set
 
-    // Channel para eventos de UI (SnackBar) - AHORA USA UiEvent
+    // Canal para enviar mensajes a la UI (snackbars).
     private val _uiEvents = Channel<UiEvent>(Channel.BUFFERED)
     val uiEvents = _uiEvents.receiveAsFlow()
 
-    // Propiedades computadas
+    // Información del sistema operativo actual.
+    val currentOSInfo: String = PlatformService.getOsNameWithVersion()
+
+    // Total de aplicaciones cargadas.
     val totalAppsCount: Int
         get() = apps.size
-
-    val currentOSInfo: String = PlatformService.getOsNameWithVersion()
 
     init {
         loadApps()
     }
 
-    // Aplicaciones filtradas por búsqueda
+    /**
+     * Devuelve la lista de apps filtrada según la búsqueda.
+     */
     val filteredApps: List<AppInfo>
         get() = apps.filter { it.name.contains(searchQuery, ignoreCase = true) }
 
     /**
-     * Carga las aplicaciones del sistema asíncronamente
+     * Escanea el sistema en segundo plano y carga las aplicaciones detectadas.
+     * Maneja errores y los notifica a la UI.
      */
     private fun loadApps() {
         viewModelScope.launch {
@@ -67,17 +80,16 @@ class LauncherViewModel {
                 val scannedApps = withContext(Dispatchers.IO) {
                     AppScanner.scanSystemApps()
                 }
-
                 apps = scannedApps
                 println("✅ Apps cargadas correctamente. Total: ${apps.size}")
 
             } catch (e: Exception) {
                 println("❌ ERROR en el escaneo: ${e.message}")
-                e.printStackTrace()
                 apps = emptyList()
 
-                // MODIFICADO: Notificar al usuario del error
-                _uiEvents.send(UiEvent("Error al escanear aplicaciones: ${e.message}", isError = true))
+                _uiEvents.send(
+                    UiEvent("Error al escanear aplicaciones: ${e.message}", isError = true)
+                )
 
             } finally {
                 isLoading = false
@@ -85,31 +97,42 @@ class LauncherViewModel {
         }
     }
 
+    /**
+     * Actualiza la consulta del buscador.
+     */
     fun updateSearchQuery(query: String) {
         searchQuery = query
     }
 
     /**
-     * Lanza una aplicación según el sistema operativo.
+     * Ejecuta una aplicación según el sistema operativo del usuario.
+     * Construye el comando adecuado para Windows o Linux.
      */
     fun launchApp(app: AppInfo) {
         val os = PlatformService.getCurrentOS()
 
         val command: List<String> = when (os) {
+
             OperatingSystem.Windows -> {
+                // Ejecutar mediante 'start' para abrir programas .exe y accesos directos.
                 listOf("cmd.exe", "/c", "start", "\"\"", "\"${app.path}\"")
             }
+
             OperatingSystem.Linux -> {
                 val path = app.path
 
-                if (path.startsWith("/")) {
-                    listOf(path)
-                } else if (path.endsWith(".desktop")) {
-                    listOf("gtk-launch", File(app.path).nameWithoutExtension)
-                } else {
-                    listOf("/bin/bash", "-c", path)
+                when {
+                    path.startsWith("/") ->
+                        listOf(path)  // Ruta directa a ejecutable
+
+                    path.endsWith(".desktop") ->
+                        listOf("gtk-launch", File(path).nameWithoutExtension)
+
+                    else ->
+                        listOf("/bin/bash", "-c", path)
                 }
             }
+
             else -> {
                 println("❌ Sistema operativo no soportado")
                 viewModelScope.launch {
@@ -122,71 +145,75 @@ class LauncherViewModel {
         println("🚀 Lanzando: ${app.name}")
         println("📝 Comando: ${command.joinToString(" ")}")
 
+        // Lanzamiento en hilo de fondo.
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val process = ProcessBuilder(command).start()
-
-                // OPCIONAL: Esperar un momento para verificar si el proceso se inició
                 val exitCode = process.waitFor()
+
+                // Notificar si la aplicación devolvió un error.
                 if (exitCode != 0) {
                     withContext(Dispatchers.Main) {
-                        _uiEvents.send(UiEvent("⚠️ ${app.name} terminó con código de error: $exitCode", isError = true))
+                        _uiEvents.send(
+                            UiEvent("⚠️ ${app.name} terminó con un código de error: $exitCode", isError = true)
+                        )
                     }
                 }
 
             } catch (e: IOException) {
-                println("❌ ERROR: No se pudo lanzar ${app.name}")
-                println("Ruta: ${app.path}")
-                e.printStackTrace()
+                println("❌ ERROR al lanzar ${app.name}: ${e.message}")
 
-                // MODIFICADO: Notificar al usuario del error
                 withContext(Dispatchers.Main) {
-                    _uiEvents.send(UiEvent("❌ Error al lanzar ${app.name}: ${e.message ?: "Ruta inválida"}", isError = true))
+                    _uiEvents.send(
+                        UiEvent("❌ Error al lanzar ${app.name}: ${e.message}", isError = true)
+                    )
                 }
+
             } catch (e: Exception) {
                 println("❌ ERROR inesperado: ${e.message}")
-                e.printStackTrace()
 
                 withContext(Dispatchers.Main) {
-                    _uiEvents.send(UiEvent("❌ Error inesperado al lanzar ${app.name}", isError = true))
+                    _uiEvents.send(
+                        UiEvent("❌ Error inesperado al lanzar ${app.name}", isError = true)
+                    )
                 }
             }
         }
     }
 
     /**
-     * Añade una aplicación manualmente.
+     * Añade una aplicación personalizada al listado.
+     * Evita duplicados comparando las rutas.
      */
     fun addApp(app: AppInfo) {
         if (apps.any { it.path.equals(app.path, ignoreCase = true) }) {
             val message = "🚫 App ya existente: ${app.name}. No se añadió."
             println(message)
+
             viewModelScope.launch {
-                // MODIFICADO: Usar color de error (isError=true)
                 _uiEvents.send(UiEvent(message, isError = true))
             }
             return
         }
+
         apps = apps + app
         println("✅ App añadida: ${app.name}")
 
-        // MODIFICADO: Notificar éxito al usuario (isError=false, usa el color por defecto/Primary)
         viewModelScope.launch {
-            _uiEvents.send(UiEvent("✅ ${app.name} añadida correctamente", isError = false))
+            _uiEvents.send(UiEvent("✅ ${app.name} añadida correctamente"))
         }
     }
 
     /**
-     * Elimina una aplicación personalizada.
+     * Elimina una aplicación añadida manualmente por el usuario.
      */
     fun removeApp(app: AppInfo) {
         if (app.isCustom) {
             apps = apps - app
             println("🗑️ App eliminada: ${app.name}")
 
-            // MODIFICADO: Usar color de éxito/neutral (isError=false)
             viewModelScope.launch {
-                _uiEvents.send(UiEvent("🗑️ ${app.name} eliminada", isError = false))
+                _uiEvents.send(UiEvent("🗑️ ${app.name} eliminada"))
             }
         }
     }

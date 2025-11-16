@@ -35,10 +35,11 @@ import javax.swing.UIManager
 import javax.swing.filechooser.FileNameExtensionFilter
 import java.io.File
 
-// Tamaño del icono en Compose (basado en el tamaño de extracción de 64px)
+// Define el tamaño del icono a mostrar en la interfaz.
 private val ICON_DISPLAY_SIZE = 64.dp
 private val ICON_EXTRACTION_SIZE = 64
 
+// Composable principal que construye la pantalla completa del lanzador de aplicaciones.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppLauncherScreen() {
@@ -47,6 +48,7 @@ fun AppLauncherScreen() {
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Efecto lanzado que escucha los eventos del ViewModel para mostrar mensajes (SnackBar).
     LaunchedEffect(Unit) {
         // MODIFICADO: Recibir UiEvent en lugar de String
         viewModel.uiEvents.collect { event ->
@@ -64,8 +66,10 @@ fun AppLauncherScreen() {
     val totalAppsCount = viewModel.totalAppsCount
     val osName = viewModel.currentOSInfo
 
+    // Estructura Scaffold (esqueleto) de la pantalla.
     Scaffold(
         snackbarHost = {
+            // Define cómo se mostrarán los SnackBar (incluyendo la lógica de color por mensaje).
             // MODIFICADO: SnackbarHost para determinar el color
             SnackbarHost(snackbarHostState) { data ->
                 // ELIMINAR ESTA LÍNEA QUE CAUSA EL ERROR:
@@ -88,6 +92,7 @@ fun AppLauncherScreen() {
         modifier = Modifier.fillMaxSize()
     ) { paddingValues ->
 
+        // Columna principal que contiene el Header, SearchBar y la Lista de Apps.
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -119,7 +124,7 @@ fun AppLauncherScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            // Lista de aplicaciones
+            // Control de visualización: Muestra loading, lista o vista vacía.
             if (isLoading) {
                 LoadingView()
             } else if (filteredApps.isEmpty()) {
@@ -130,8 +135,10 @@ fun AppLauncherScreen() {
 
                 val listState = rememberLazyListState()
 
+                // Contenedor para la lista de aplicaciones y su scrollbar.
                 Box(modifier = Modifier.fillMaxSize()) {
 
+                    // Lista de aplicaciones cargadas y filtradas.
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().padding(end = 12.dp),
@@ -151,6 +158,7 @@ fun AppLauncherScreen() {
                         }
                     }
 
+                    // Barra de desplazamiento lateral personalizada.
 // Barra de Desplazamiento Lateral (Scrollbar) con color blanco
                     VerticalScrollbar(
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
@@ -175,6 +183,7 @@ fun AppLauncherScreen() {
 // HEADER
 // ============================================================================
 
+// Componente Composable para la cabecera de la aplicación.
 @Composable
 fun AppHeader(
     totalAppsCount: Int,
@@ -182,6 +191,7 @@ fun AppHeader(
     onAddAppClicked: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+        // Fila superior con el título y el botón "Añadir App".
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -204,6 +214,7 @@ fun AppHeader(
 
         Spacer(Modifier.height(8.dp))
 
+        // Fila inferior con el contador de aplicaciones y la información del SO.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -229,28 +240,31 @@ fun AppHeader(
 // ============================================================================
 
 /**
- * Abre el explorador de archivos nativo del sistema.
+ * Abre el explorador de archivos nativo del sistema para que el usuario seleccione una aplicación.
+ * Se ejecuta en un contexto de corrutina (Dispatchers.IO).
  */
 private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers.IO) {
     try {
+        // Configuración para usar la apariencia nativa del sistema operativo.
         UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
 
         val osName = System.getProperty("os.name", "").lowercase()
         val isWindows = osName.contains("win")
         val isLinux = osName.contains("nux") || osName.contains("nix")
 
+        // Inicializa y configura el selector de archivos (JFileChooser).
         val fileChooser = JFileChooser().apply {
             dialogTitle = "Seleccionar aplicación ejecutable o .desktop"
             fileSelectionMode = JFileChooser.FILES_ONLY
 
-            // Carpeta inicial según el SO
+            // Configura la carpeta inicial según el SO.
             currentDirectory = when {
                 isWindows -> File("C:\\Program Files")
                 isLinux -> File(System.getProperty("user.home"))
                 else -> File(System.getProperty("user.home"))
             }
 
-            // Filtros según el SO
+            // Aplica filtros de archivo específicos para Windows (.exe) y Linux (.desktop).
             fileFilter = when {
                 isWindows -> FileNameExtensionFilter("Archivos ejecutables (*.exe)", "exe")
                 isLinux -> object : javax.swing.filechooser.FileFilter() {
@@ -270,9 +284,11 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
 
         val result = fileChooser.showOpenDialog(null)
 
+        // Procesa la selección del usuario.
         if (result == JFileChooser.APPROVE_OPTION) {
             val selectedFile = fileChooser.selectedFile
 
+            // Verifica si el archivo es válido para el SO.
             val isValid = when {
                 isWindows -> selectedFile.exists() && selectedFile.name.endsWith(".exe", ignoreCase = true)
                 isLinux -> selectedFile.exists() && selectedFile.name.endsWith(".desktop")
@@ -286,6 +302,7 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
 
             // --- PROCESAMIENTO DE ARCHIVO ---
             when {
+                // Lógica específica para archivos .desktop (Linux).
                 selectedFile.name.endsWith(".desktop") -> {
                     // Lógica para Linux: Parsear .desktop
                     val desktopInfo = parseDesktopFileForManualAdd(selectedFile)
@@ -297,6 +314,7 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
                         IconExtractor.extractLinuxIcon(desktopInfo.third!!)
                     } else null
 
+                    // Construye el objeto AppInfo a partir de los datos parseados.
                     AppInfo(
                         name = desktopInfo.first,
                         path = desktopInfo.second,
@@ -306,17 +324,22 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
                         iconBytes = iconBytes
                     )
                 }
+                // Lógica específica para ejecutables .exe (Windows).
                 isWindows -> {
                     // Lógica para Windows: Procesar .exe
+
+                    // Genera un nombre de aplicación limpio.
                     val appName = selectedFile.nameWithoutExtension
                         .replace("-", " ")
                         .replace("_", " ")
                         .split(" ")
                         .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
 
+                    // Extrae el icono del ejecutable.
                     // Usar el tamaño constante 64px para la extracción
                     val iconBytes = IconExtractor.extractIconAsBytes(selectedFile.absolutePath, size = ICON_EXTRACTION_SIZE)
 
+                    // Construye el objeto AppInfo.
                     AppInfo(
                         name = appName,
                         path = selectedFile.absolutePath,
@@ -329,10 +352,12 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
                 else -> null
             }
         } else {
+            // El usuario canceló la selección.
             println("🚫 Selección cancelada por el usuario")
             null
         }
     } catch (e: Exception) {
+        // Manejo de errores durante la apertura del explorador.
         println("❌ Error abriendo explorador de archivos: ${e.message}")
         e.printStackTrace()
         null
@@ -340,9 +365,7 @@ private suspend fun openNativeFileExplorer(): AppInfo? = withContext(Dispatchers
 }
 
 /**
- * Parsea un archivo .desktop seleccionado manualmente para obtener el nombre, la ruta de ejecución y el icono.
- * Incluye la lógica de resolución de ruta con fallback.
- * Devuelve Triple<Name, ExecutablePath, IconName>.
+ * Función auxiliar para leer y extraer el Nombre, Ejecutable (Exec) y Icono de un archivo .desktop.
  */
 private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, String, String?>? {
     try {
@@ -366,6 +389,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
             return null
         }
 
+        // Limpia el comando de ejecución (Exec) de argumentos (%f, %u, etc.).
         val cleanExec = exec!!
             .replace(Regex("%[a-zA-Z]"), "") // Limpiar códigos como %f, %u, etc.
             .trim()
@@ -373,6 +397,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
             .firstOrNull() ?: return null
 
         // --- CORRECCIÓN: Lógica de resolución de la ruta con fallback ---
+        // Intenta obtener la ruta absoluta y canónica del ejecutable.
         val executablePath = resolveExecutablePathFromCommand(cleanExec)
 
         // Si la resolución falla (executablePath es nulo), usamos el comando limpio original (cleanExec)
@@ -385,6 +410,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
         }
         // --- FIN de la corrección ---
 
+        // Devuelve el nombre, la ruta final y el nombre del icono.
         return Triple(name!!, finalPath, iconName)
 
     } catch (e: Exception) {
@@ -394,9 +420,7 @@ private fun parseDesktopFileForManualAdd(desktopFile: File): Triple<String, Stri
 }
 
 /**
- * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH.
- * Retorna NULL si no puede resolver una ruta ejecutable existente.
- * (Copia de la lógica de AppScanner.kt para uso local)
+ * Resuelve la ruta completa y canónica de un ejecutable de Linux buscando en el PATH del sistema.
  */
 private fun resolveExecutablePathFromCommand(command: String): String? {
     // Lista de ubicaciones a verificar, incluyendo el comando directo si es una ruta absoluta
@@ -407,12 +431,14 @@ private fun resolveExecutablePathFromCommand(command: String): String? {
         searchFiles.add(File(command))
     }
 
+    // Busca el comando dentro de las carpetas definidas en la variable de entorno PATH.
     // Buscar en el PATH si es solo un comando (ej: "vim")
     val pathEnv = System.getenv("PATH") ?: ""
     for (path in pathEnv.split(":")) {
         searchFiles.add(File(path, command))
     }
 
+    // Itera sobre las posibles rutas hasta encontrar un archivo existente y ejecutable.
     for (file in searchFiles) {
         if (file.exists() && file.canExecute()) {
             return try {
@@ -433,6 +459,7 @@ private fun resolveExecutablePathFromCommand(command: String): String? {
 // COMPONENTES DE UI
 // ============================================================================
 
+// Composable que define la fila de encabezado de la lista de aplicaciones.
 @Composable
 fun AppListHeader() {
     Surface(
@@ -441,6 +468,7 @@ fun AppListHeader() {
         color = AppColors.Surface,
         tonalElevation = 2.dp
     ) {
+        // Define las columnas: Icono, Nombre, Ruta de instalación y Acciones.
         Row(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -479,6 +507,7 @@ fun AppListHeader() {
     }
 }
 
+// Composable que representa una única fila de aplicación en la lista.
 @Composable
 fun AppListItem(
     app: AppInfo,
@@ -486,6 +515,7 @@ fun AppListItem(
     onRemove: (() -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    // Detecta si el ratón está sobre el elemento para cambiar su estilo visual.
     val hovered by interactionSource.collectIsHoveredAsState()
 
     Surface(
@@ -493,6 +523,7 @@ fun AppListItem(
             .fillMaxWidth()
             .hoverable(interactionSource),
         shape = RoundedCornerShape(12.dp),
+        // Cambia el color si el ratón está encima.
         color = if (hovered) AppColors.Surface.copy(alpha = 0.8f) else AppColors.Surface,
         tonalElevation = if (hovered) 4.dp else 2.dp
     ) {
@@ -506,10 +537,12 @@ fun AppListItem(
                     .height(80.dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Muestra el icono de la aplicación.
                 // Usar AppIcon directamente, que maneja el fallback
                 AppIcon(iconBytes = app.iconBytes, size = ICON_EXTRACTION_SIZE)
             }
 
+            // Muestra el nombre de la aplicación.
             Text(
                 text = app.name,
                 modifier = Modifier.weight(0.3f).padding(start = 12.dp),
@@ -519,6 +552,7 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
+            // Muestra la ruta de instalación.
             Text(
                 text = app.path,
                 modifier = Modifier.weight(0.5f).padding(start = 12.dp),
@@ -528,11 +562,13 @@ fun AppListItem(
                 overflow = TextOverflow.Ellipsis
             )
 
+            // Contenedor para los botones de acción (Lanzar y Eliminar).
             Row(
                 modifier = Modifier.width(160.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Botón para lanzar la aplicación.
                 Button(
                     onClick = onLaunch,
                     colors = ButtonDefaults.buttonColors(AppColors.Primary),
@@ -542,6 +578,7 @@ fun AppListItem(
                     Text("▶ Lanzar", style = MaterialTheme.typography.labelMedium)
                 }
 
+                // Muestra el botón de eliminar solo para apps personalizadas.
                 if (onRemove != null) {
                     IconButton(
                         onClick = onRemove,
@@ -555,8 +592,10 @@ fun AppListItem(
     }
 }
 
+// Componente Composable encargado de cargar y mostrar el icono de la aplicación.
 @Composable
 fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
+    // Recuerda y convierte los bytes del icono a un ImageBitmap.
     val imageBitmap = remember(iconBytes) {
         if (iconBytes == null) return@remember null
 
@@ -569,6 +608,7 @@ fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
         }
     }
 
+    // Muestra el icono cargado o un fallback si la carga falla.
     if (imageBitmap != null) {
         Image(
             painter = BitmapPainter(imageBitmap),
@@ -579,6 +619,7 @@ fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
             contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
     } else {
+        // Vista de fallback (icono de interrogación).
         Box(
             modifier = Modifier
                 .size(size.dp)
@@ -595,6 +636,7 @@ fun AppIcon(iconBytes: ByteArray?, size: Int = ICON_EXTRACTION_SIZE) {
     }
 }
 
+// Composable que implementa la barra de búsqueda.
 @Composable
 fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
     Surface(
@@ -608,6 +650,7 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
         ) {
             Text("🔍", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.width(12.dp))
+            // Campo de texto básico para la entrada de búsqueda.
             BasicTextField(
                 value = query,
                 onValueChange = onQueryChange,
@@ -615,6 +658,7 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = AppColors.OnSurface),
                 singleLine = true,
                 cursorBrush = SolidColor(AppColors.Primary),
+                // Muestra un texto de marcador de posición si la entrada está vacía.
                 decorationBox = { inner ->
                     if (query.isEmpty()) {
                         Text(
@@ -625,6 +669,7 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
                     inner()
                 }
             )
+            // Botón para borrar la búsqueda si hay texto.
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
                     Text("❌")
@@ -634,6 +679,7 @@ fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
     }
 }
 
+// Vista que se muestra cuando no hay aplicaciones o la búsqueda no arroja resultados.
 @Composable
 fun EmptyView() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -654,10 +700,12 @@ fun EmptyView() {
     }
 }
 
+// Vista que se muestra mientras se escanean y cargan las aplicaciones iniciales.
 @Composable
 fun LoadingView() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Indicador de progreso circular.
             CircularProgressIndicator(color = AppColors.Primary)
             Spacer(Modifier.height(16.dp))
             Text(

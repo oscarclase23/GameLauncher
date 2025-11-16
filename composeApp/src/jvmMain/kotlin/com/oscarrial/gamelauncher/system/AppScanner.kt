@@ -7,31 +7,37 @@ import java.io.File
  * Servicio encargado de escanear aplicaciones del sistema.
  * Soporta Windows y Linux (incluyendo Snap y Flatpak).
  */
+// Objeto singleton que contiene toda la lógica para buscar aplicaciones instaladas.
 object AppScanner {
 
     private val USER_HOME = System.getProperty("user.home")
-    private const val DEFAULT_FALLBACK_ICON = "🎮"
+    private const val DEFAULT_FALLBACK_ICON = "❓"
 
     // ==================== RUTAS DE WINDOWS ====================
 
+    // Rutas comunes para directorios de archivos de programa en Windows.
     private val WINDOWS_PROGRAM_FILES = listOf(
         "C:\\Program Files",
         "C:\\Program Files (x86)",
     )
 
+    // Rutas de datos de aplicación (AppData) donde se instalan muchas aplicaciones modernas.
     private val WINDOWS_APP_DATA_PATHS = listOf(
         "$USER_HOME\\AppData\\Local\\Programs",
         "$USER_HOME\\AppData\\Local",
         "$USER_HOME\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs"
     )
 
+    // Rutas del sistema operativo Windows para aplicaciones básicas.
     private val WINDOWS_SYSTEM_PATHS = listOf(
         "C:\\Windows\\System32",
         "C:\\Windows"
     )
 
+    // Combinación de todas las rutas de programa y AppData para el escaneo principal.
     private val ALL_WINDOWS_PATHS = WINDOWS_PROGRAM_FILES + WINDOWS_APP_DATA_PATHS
 
+    // Mapa de aplicaciones conocidas con posibles nombres de ejecutables para un escaneo más preciso.
     private val KNOWN_APPS = mapOf(
         "intellij" to listOf("idea64.exe", "idea.exe"),
         "androidstudio" to listOf("studio64.exe", "studio.exe"),
@@ -57,6 +63,7 @@ object AppScanner {
         "notion" to listOf("notion.exe")
     )
 
+    // Mapa de aplicaciones de sistema básicas de Windows y sus ejecutables.
     private val SYSTEM_APPS = mapOf(
         "Calculadora" to "calc.exe",
         "Paint" to "mspaint.exe",
@@ -66,6 +73,7 @@ object AppScanner {
         "PowerShell" to "powershell.exe"
     )
 
+    // Lista de nombres de ejecutables que deben ser ignorados (instaladores, desinstaladores, etc.).
     private val IGNORED_NAMES = setOf(
         "unins000.exe", "uninstall.exe", "uninst.exe", "setup.exe", "install.exe",
         "updater.exe", "update.exe", "launcher.exe", "helper.exe", "crashhandler.exe",
@@ -73,11 +81,13 @@ object AppScanner {
         "autorun.exe", "runtime.exe", "redist.exe", "prerequisite.exe"
     ).map { it.lowercase() }.toSet()
 
+    // Palabras clave dentro de nombres de archivo que sugieren que un ejecutable debe ser ignorado.
     private val IGNORED_KEYWORDS = setOf(
         "uninstall", "setup", "install", "update", "updater", "crash", "redist",
         "helper", "maintenance", "prerequisite", "launcher", "bootstrapper"
     )
 
+    // Nombres de carpetas comunes que deben ser excluidas del escaneo.
     private val IGNORED_FOLDERS = setOf(
         "common", "commonfiles", "shared", "lib", "libs", "library", "bin32",
         "data", "temp", "cache", "logs", "resources", "assets", "locales",
@@ -86,6 +96,7 @@ object AppScanner {
 
     // ==================== RUTAS DE LINUX ====================
 
+    // Rutas donde se encuentran los archivos .desktop (accesos directos a aplicaciones) en Linux.
     private val LINUX_APPLICATION_PATHS = listOf(
         // Rutas estándar
         "/usr/share/applications",
@@ -100,6 +111,7 @@ object AppScanner {
         "$USER_HOME/.local/share/flatpak/exports/share/applications"
     )
 
+    // Lista de nombres de ejecutables considerados esenciales que deben ser incluidos, incluso si el filtro inicial los podría descartar.
     private val ESSENTIAL_LINUX_NAMES = listOf(
         "nautilus", "firefox", "terminal", "settings", "calculator",
         "clock", "calendar", "maps", "photos", "evince",
@@ -111,6 +123,7 @@ object AppScanner {
 
     // ==================== FUNCIÓN PRINCIPAL ====================
 
+    // Función principal que determina el SO y delega el escaneo al método apropiado.
     fun scanSystemApps(): List<AppInfo> {
         val osName = System.getProperty("os.name", "").lowercase()
 
@@ -126,18 +139,23 @@ object AppScanner {
 
     // ==================== WINDOWS SCANNING ====================
 
+    // Lógica para escanear aplicaciones en Windows, combinando diferentes estrategias.
     private fun scanWindowsApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
         println("🔍 Iniciando escaneo de aplicaciones de Windows...")
 
+        // Escanea apps del sistema (ej: Notepad).
         foundApps.addAll(scanWindowsSystemApps())
+        // Escanea apps conocidas con rutas específicas (ej: IDEs).
         foundApps.addAll(scanKnownApps())
 
+        // Escaneo profundo de todos los directorios principales de instalación.
         for (basePath in ALL_WINDOWS_PATHS) {
             val baseDir = File(basePath)
             if (baseDir.exists() && baseDir.isDirectory) {
                 baseDir.listFiles()?.forEach { entry ->
+                    // Procesa cada subdirectorio si no está en la lista de carpetas ignoradas.
                     if (entry.isDirectory && !isIgnoredFolder(entry)) {
                         scanAppFolder(entry, foundApps, basePath in WINDOWS_PROGRAM_FILES)
                     }
@@ -147,6 +165,7 @@ object AppScanner {
 
         println("✅ Escaneo completado. Se encontraron ${foundApps.size} aplicaciones.")
 
+        // Limpia duplicados y ordena la lista final de aplicaciones.
         return foundApps
             .distinctBy { it.path.lowercase() }
             .groupBy { it.name }
@@ -156,6 +175,7 @@ object AppScanner {
             .sortedBy { it.name }
     }
 
+    // Busca las aplicaciones de sistema básicas de Windows.
     private fun scanWindowsSystemApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
@@ -172,6 +192,7 @@ object AppScanner {
         return apps
     }
 
+    // Busca aplicaciones basándose en la lista predefinida de aplicaciones conocidas.
     private fun scanKnownApps(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
 
@@ -185,6 +206,7 @@ object AppScanner {
         return apps
     }
 
+    // Realiza una búsqueda heurística en carpetas para encontrar un ejecutable principal de una aplicación conocida.
     private fun findKnownApp(appKey: String, exeNames: List<String>): AppInfo? {
         for (basePath in ALL_WINDOWS_PATHS) {
             val baseDir = File(basePath)
@@ -205,6 +227,7 @@ object AppScanner {
         return null
     }
 
+    // Búsqueda recursiva de un ejecutable específico dentro de una carpeta hasta una profundidad máxima.
     private fun searchInFolderRecursive(
         folder: File,
         exeNames: List<String>,
@@ -225,6 +248,7 @@ object AppScanner {
         return null
     }
 
+    // Verifica si una carpeta debe ser ignorada durante el escaneo.
     private fun isIgnoredFolder(folder: File): Boolean {
         val folderName = folder.name.lowercase().replace(" ", "").replace("-", "")
 
@@ -236,6 +260,7 @@ object AppScanner {
         return false
     }
 
+    // Escanea una carpeta de aplicación para encontrar el ejecutable principal basándose en un sistema de puntuación.
     private fun scanAppFolder(
         appFolder: File,
         foundApps: MutableList<AppInfo>,
@@ -243,6 +268,7 @@ object AppScanner {
     ) {
         val appFolderName = appFolder.name.lowercase().replace(" ", "").replace("-", "")
 
+        // Define directorios dentro de la carpeta a inspeccionar (ej: 'bin', 'app-x.x.x').
         val searchDirs = mutableListOf(appFolder)
         appFolder.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
             val dirName = dir.name.lowercase()
@@ -253,6 +279,7 @@ object AppScanner {
             }
         }
 
+        // Genera una lista de ejecutables candidatos, excluyendo los ignorados.
         val candidates = searchDirs.flatMap { dir ->
             dir.listFiles()?.filter {
                 it.isFile &&
@@ -261,6 +288,7 @@ object AppScanner {
             } ?: emptyList()
         }
 
+        // Selecciona el ejecutable principal con el mejor nombre (más parecido al nombre de la carpeta).
         val mainExe = candidates.minByOrNull { file ->
             val exeName = file.nameWithoutExtension.lowercase().replace(" ", "").replace("-", "")
 
@@ -275,11 +303,13 @@ object AppScanner {
             matchScore + lengthScore
         }
 
+        // Crea el objeto AppInfo si se encuentra un ejecutable principal.
         mainExe?.let { file ->
             foundApps.add(createAppInfoFromWindowsFile(file, appFolder.name))
         }
     }
 
+    // Verifica si un archivo ejecutable debe ser ignorado.
     private fun isIgnoredExecutable(file: File): Boolean {
         val fileName = file.name.lowercase()
 
@@ -293,15 +323,19 @@ object AppScanner {
         return false
     }
 
+    // Crea un objeto AppInfo para una aplicación de Windows, extrayendo el icono y formateando el nombre.
     private fun createAppInfoFromWindowsFile(file: File, folderName: String? = null): AppInfo {
+        // Formatea el nombre a mayúsculas iniciales.
         val name = (folderName ?: file.nameWithoutExtension)
             .replace("-", " ")
             .replace("_", " ")
             .split(" ")
             .joinToString(" ") { it.capitalize() }
 
+        // Intenta extraer el icono del ejecutable.
         println("  🎨 Extrayendo icono de: ${file.name}")
         val iconBytes = try {
+            // Se utiliza la lógica de IconExtractor para obtener los bytes del icono.
             IconExtractor.extractIconAsBytes(file.absolutePath, size = 64)
         } catch (e: Exception) {
             println("  ⚠️ Error extrayendo icono de ${file.name}: ${e.message}")
@@ -325,11 +359,13 @@ object AppScanner {
 
     // ==================== LINUX SCANNING ====================
 
+    // Lógica para escanear aplicaciones en Linux buscando archivos .desktop.
     private fun scanLinuxApps(): List<AppInfo> {
         val foundApps = mutableListOf<AppInfo>()
 
         println("🔍 Iniciando escaneo de aplicaciones de Linux (incluyendo Snap/Flatpak)...")
 
+        // Itera sobre las rutas comunes de archivos .desktop.
         for (appPath in LINUX_APPLICATION_PATHS) {
             val appDir = File(appPath)
             if (!appDir.exists() || !appDir.isDirectory) {
@@ -339,6 +375,7 @@ object AppScanner {
 
             println("📂 Escaneando: $appPath")
 
+            // Procesa cada archivo .desktop encontrado.
             appDir.listFiles()?.filter { it.name.endsWith(".desktop") }?.forEach { desktopFile ->
                 try {
                     val appInfo = parseDesktopFile(desktopFile)
@@ -353,11 +390,13 @@ object AppScanner {
 
         println("✅ Escaneo completado. Se encontraron ${foundApps.size} aplicaciones.")
 
+        // Limpia duplicados y ordena la lista final.
         return foundApps
             .distinctBy { it.path.lowercase() }
             .sortedBy { it.name }
     }
 
+    // Parsea un archivo .desktop para extraer los metadatos de la aplicación.
     private fun parseDesktopFile(desktopFile: File): AppInfo? {
         var name: String? = null
         var exec: String? = null
@@ -366,6 +405,7 @@ object AppScanner {
         var isHidden = false
         var cleanExec: String? = null
 
+        // Lee el archivo línea por línea para encontrar los campos clave.
         desktopFile.readLines().forEach { line ->
             val trimmedLine = line.trim()
             when {
@@ -373,6 +413,7 @@ object AppScanner {
                 trimmedLine.startsWith("Name=") && name == null -> name = trimmedLine.substringAfter("Name=")
                 trimmedLine.startsWith("Exec=") -> {
                     exec = trimmedLine.substringAfter("Exec=")
+                    // Limpia el comando de ejecución de parámetros.
                     cleanExec = exec!!
                         .replace(Regex("%[a-zA-Z]"), "")
                         .trim()
@@ -386,6 +427,7 @@ object AppScanner {
             }
         }
 
+        // Filtra archivos que no tienen nombre, ejecutable o están marcados como ocultos.
         if (name.isNullOrBlank() || cleanExec.isNullOrBlank() || isHidden) {
             return null
         }
@@ -394,6 +436,7 @@ object AppScanner {
         val normalizedName = name!!.lowercase().replace(" ", "").replace("-", "")
 
         // 🔍 Evitar subprocesos irrelevantes (daemons, helpers, etc.)
+        // Filtra comandos que parecen ser subprocesos o utilidades internas, a menos que sean esenciales.
         val isNotMainApp = normalizedExec.contains("handler") ||
                 normalizedExec.contains("agent") ||
                 normalizedExec.contains("daemon") ||
@@ -403,6 +446,7 @@ object AppScanner {
             return null
         }
 
+        // Resuelve la ruta del ejecutable (busca en PATH, rutas absolutas, etc.).
         val finalPath = resolveExecutablePath(cleanExec!!)
 
 
@@ -412,6 +456,7 @@ object AppScanner {
         }
 
         // 🎨 Cargar icono (mejorado)
+        // Intenta cargar el icono utilizando el nombre del icono.
         val iconBytes = iconName?.let { IconExtractor.extractLinuxIcon(it) }
 
         if (iconBytes == null) {
@@ -430,6 +475,7 @@ object AppScanner {
     }
 
 
+    // Intenta encontrar la ruta absoluta de un ejecutable de Linux buscando en el PATH.
     private fun resolveExecutablePath(exec: String): String? {
         val file = File(exec)
         if (file.exists()) return file.absolutePath
@@ -442,12 +488,14 @@ object AppScanner {
         }
 
         // ⚙️ Si es un comando flatpak o snap, mantenemos el texto tal cual
+        // Mantiene comandos especiales (ej: "flatpak run com.app.name") sin resolver a una ruta física.
         return when {
             exec.startsWith("flatpak") || exec.startsWith("snap") -> exec
             else -> null
         }
     }
 
+    // Función de extensión para poner en mayúscula la primera letra de una cadena.
     private fun String.capitalize(): String {
         return replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }

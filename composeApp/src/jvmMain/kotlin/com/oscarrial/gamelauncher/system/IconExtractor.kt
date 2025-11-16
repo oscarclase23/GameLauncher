@@ -14,11 +14,14 @@ import kotlin.math.min
  * Extrae iconos de alta calidad de ejecutables de Windows (.exe)
  * y de aplicaciones de Linux.
  */
+// Objeto que gestiona la extracción de iconos del sistema operativo.
 object IconExtractor {
 
     private val USER_HOME = System.getProperty("user.home")
+    // Ruta de acceso al directorio del usuario actual.
 
     // Rutas estándar de iconos en Linux
+    // Rutas predefinidas donde se buscan los iconos de las aplicaciones en sistemas Linux.
     private val LINUX_ICON_PATHS = listOf(
         "/usr/share/icons",
         "/usr/share/pixmaps",
@@ -27,6 +30,7 @@ object IconExtractor {
     )
 
     // Tamaños de iconos comunes en Linux
+    // Tamaños de icono comunes a buscar en las rutas de Linux (priorizando el mayor).
     private val ICON_SIZES = listOf(256, 128, 96, 64, 48, 32)
 
     // ==================== WINDOWS ====================
@@ -38,6 +42,7 @@ object IconExtractor {
      * @param size Tamaño deseado del icono (por defecto 64)
      * @return BufferedImage con el icono de alta calidad, o null si falla
      */
+    // Intenta extraer el icono del archivo .exe de Windows como un objeto BufferedImage.
     fun extractIcon(exePath: String, size: Int = 64): BufferedImage? {
         return try {
             val file = File(exePath)
@@ -68,6 +73,7 @@ object IconExtractor {
         }
     }
 
+    // Usa las utilidades del sistema de archivos de Windows (FileSystemView) para obtener el icono.
     private fun extractHighResolutionIcon(file: File): BufferedImage? {
         return try {
             val icon = FileSystemView.getFileSystemView().getSystemIcon(file)
@@ -87,6 +93,7 @@ object IconExtractor {
      * @param size Tamaño objetivo (por defecto 64)
      * @return ByteArray con la imagen PNG, o null si falla
      */
+    // Extrae el icono del ejecutable y lo convierte a un array de bytes PNG para su uso en la UI.
     fun extractIconAsBytes(exePath: String, size: Int = 64): ByteArray? {
         val image = extractIcon(exePath, size) ?: return null
 
@@ -105,6 +112,7 @@ object IconExtractor {
     /**
      * Extrae el icono de una aplicación de Linux.
      */
+    // Busca el icono por su nombre y lo devuelve como un array de bytes PNG.
     fun extractLinuxIcon(iconName: String): ByteArray? {
         // Si ya es una ruta absoluta, cargarla directamente
         if (iconName.startsWith("/")) {
@@ -125,6 +133,7 @@ object IconExtractor {
      * Busca un archivo de icono en las rutas estándar de Linux, priorizando
      * el tamaño más grande disponible.
      */
+    // Localiza el archivo de icono con la mejor resolución disponible en las rutas estándar de Linux.
     private fun findLinuxIconFile(iconName: String): File? {
         val extensions = listOf(".png", ".svg", ".xpm")
 
@@ -158,6 +167,7 @@ object IconExtractor {
     /**
      * Carga un icono desde una ruta y lo convierte a ByteArray PNG
      */
+    // Carga un archivo de imagen desde una ruta y lo convierte a formato ByteArray (PNG) después de escalarlo.
     private fun loadIconFromPath(path: String, size: Int = 64): ByteArray? {
         return try {
             val file = File(path)
@@ -178,6 +188,7 @@ object IconExtractor {
 
     // ==================== SHARED UTILITIES ====================
 
+    // Convierte un objeto Icon de Swing a un objeto Image de AWT.
     private fun iconToImage(icon: javax.swing.Icon): Image {
         val bufferedImage = BufferedImage(icon.iconWidth, icon.iconHeight, BufferedImage.TYPE_INT_ARGB)
         val g = bufferedImage.createGraphics()
@@ -188,6 +199,7 @@ object IconExtractor {
         return bufferedImage
     }
 
+    // Convierte un objeto Image de AWT a un objeto BufferedImage.
     private fun imageToBufferedImage(image: Image): BufferedImage {
         if (image is BufferedImage) return image
         val width = image.getWidth(null)
@@ -201,6 +213,7 @@ object IconExtractor {
         return bufferedImage
     }
 
+    // Realiza el escalado de una imagen a un tamaño objetivo utilizando algoritmos de alta calidad.
     private fun scaleImageWithQuality(source: Image, targetWidth: Int, targetHeight: Int): BufferedImage {
         val sourceWidth = source.getWidth(null)
         val sourceHeight = source.getHeight(null)
